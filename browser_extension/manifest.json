@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "다운로드 출처 기록",
+  "version": "1.1.0",
+  "description": "연결한 HTTPS 웹페이지에서 받은 파일의 출처와 페이지 제목을 이 PC에 기록합니다.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAv4HUcdBEgzjGuyOoS0yMWosPKoyZbrCZrSIqrwJZzcvhZ9I+v4LBXc6EmtQAigS1tooPh8P1ANEp54hRfD4slPoX6KtUG+bjUY/y/H7eoviuEuWy7GMCSPAtABbqrAvayfn1oioNvpK2Qktb/BrfD4MP/GI4Rx2is4R4rXM4YVK0LbH5wMG3I4DQ7y3cDTyOhLziamOCnvHh3Ejvt0flkJP9Z3xSSGNABW0+ltMkg8Pt/ANy6eEkvblssGLaJyNhHKv8j2Ur1gHdQMwLfHJapetbfc6pHJM+znQPiTLCgVI4T4SFL+2dpkKiXpoXF6ZZHYxgB8CiM1xTDI2aUW28FQIDAQAB",
+  "permissions": ["downloads", "storage", "nativeMessaging", "webRequest", "alarms", "activeTab", "scripting"],
+  "optional_host_permissions": ["https://*/*"],
+  "host_permissions": ["https://clc.chosun.ac.kr/*"],
+  "content_scripts": [{
+    "matches": ["https://clc.chosun.ac.kr/*"],
+    "js": ["course.js"],
+    "all_frames": true,
+    "run_at": "document_start"
+  }],
+  "background": {"service_worker": "downloads.js"},
+  "action": {"default_popup": "status.html", "default_title": "다운로드 출처 기록"}
+}

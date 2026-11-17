@@ -1,0 +1,15 @@
+/python/
+/runtime/
+/node_modules/
+/desktop/node_modules/
+__pycache__/
+*.py[cod]
+*.sqlite*
+*.db
+*.log
+.env
+.env.*
+/.venv/
+/History/
+/BrowserBridge/
+/download-settings.json

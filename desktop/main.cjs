@@ -1,0 +1,86 @@
+const {app, BrowserWindow, ipcMain, dialog, clipboard} = require("electron");
+const {spawn} = require("node:child_process");
+const {existsSync} = require("node:fs");
+const {createInterface} = require("node:readline");
+const path = require("node:path");
+
+const root = path.dirname(__dirname);
+const allowed = new Set(["scan","options","detail","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
+const pending = new Map();
+let window, child, sequence=0, mutating=false;
+
+function startService() {
+  const packaged = path.join(root,"python","python.exe");
+  const process = spawn(existsSync(packaged) ? packaged : "python.exe",
+    ["-B","-X","utf8","-u",path.join(root,"desktop_service.py")],
+    {cwd:root, windowsHide:true, stdio:["pipe","pipe","pipe"]});
+  child=process;
+  let errorText="";
+  process.stderr.on("data",chunk=>{errorText=(errorText+chunk.toString()).slice(-1200);});
+  function ended(message) {
+    if (child!==process) return;
+    child=null;
+    for (const resolve of pending.values()) resolve({ok:false,error:message});
+    pending.clear();
+  }
+  process.on("error",error=>ended(error.message));
+  process.on("exit",()=>ended(errorText || "분석 엔진이 종료되었습니다. 다시 분석하세요."));
+  process.stdin.on("error",error=>ended(error.message));
+  createInterface({input:process.stdout}).on("line",line=>{
+    let response;
+    try {response=JSON.parse(line);} catch {return;}
+    if (response.status) {
+      if (window && !window.isDestroyed()) window.webContents.send("scan-status",response.status);
+      return;
+    }
+    pending.get(response.id)?.(response);pending.delete(response.id);
+  });
+}
+function call(action,args) {
+  if (!child) startService();
+  const id=++sequence;
+  return new Promise(resolve=>{
+    pending.set(id,resolve);
+    child.stdin.write(JSON.stringify({id,action,args})+"\n");
+  });
+}
+function isLocal(event) {return window && event.senderFrame===window.webContents.mainFrame;}
+ipcMain.handle("desktop",async(event,action,args={})=>{
+  if (!isLocal(event) || !allowed.has(action)) return {ok:false,error:"지원하지 않는 작업입니다."};
+  if (action==="execute" && mutating) return {ok:false,error:"파일을 처리하고 있습니다."};
+  if (action==="execute") mutating=true;
+  try {
+    if (action==="preview" && args.kind==="manual") {
+      const selected=await dialog.showOpenDialog(window,{title:"파일을 이동할 폴더",properties:["openDirectory","createDirectory"]});
+      if (selected.canceled) return {ok:true,value:null};
+      args={...args,destination:selected.filePaths[0]};
+    }
+    const reply=await call(action,args);
+    if (action==="bridge" && reply.ok) clipboard.writeText(reply.value);
+    return reply;
+  } finally {if (action==="execute") mutating=false;}
+});
+ipcMain.on("cancel",event=>{if(isLocal(event) && child) child.stdin.write('{"action":"cancel"}\n');});
+
+function createWindow() {
+  window=new BrowserWindow({width:1380,height:920,minWidth:870,minHeight:630,show:false,
+    title:"다운로드 정리",backgroundColor:"#f9f9fc",autoHideMenuBar:true,
+    icon:path.join(root,"icons","brand.png"),titleBarStyle:"hidden",
+    titleBarOverlay:{color:"#f8f8fb",symbolColor:"#55546a",height:38},
+    webPreferences:{preload:path.join(__dirname,"preload.cjs"),sandbox:true,contextIsolation:true,nodeIntegration:false}});
+  window.removeMenu();
+  window.webContents.setWindowOpenHandler(()=>({action:"deny"}));
+  window.webContents.on("will-navigate",event=>event.preventDefault());
+  window.once("ready-to-show",()=>window.show());
+  window.on("close",event=>{
+    if(mutating){event.preventDefault();window.webContents.send("scan-status","파일 이동을 마친 뒤 창을 닫을 수 있어요.");}
+  });
+  window.loadFile(path.join(__dirname,"index.html"));
+}
+if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.on("second-instance",()=>{if(window){if(window.isMinimized())window.restore();window.focus();}});
+  app.whenReady().then(createWindow);
+  app.on("window-all-closed",()=>app.quit());
+  app.on("before-quit",()=>{if(child && !mutating) child.stdin.end();});
+}
