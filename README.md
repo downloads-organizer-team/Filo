@@ -10,14 +10,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/seungan123/downloads-organizer/releases/download/v1.0.0/downloads-organizer-windows-x64.zip"><img src="https://img.shields.io/badge/Download_for_Windows_x64-v1.0.0-6854D5?style=for-the-badge&amp;labelColor=343247" alt="Windows x64용 ZIP 다운로드 (v1.0.0)"></a>
+  <a href="https://github.com/downloads-organizer-team/downloads-organizer/releases/download/v1.0.0/downloads-organizer-windows-x64.zip"><img src="https://img.shields.io/badge/Download_for_Windows_x64-v1.0.0-6854D5?style=for-the-badge&amp;labelColor=343247" alt="Windows x64용 ZIP 다운로드 (v1.0.0)"></a>
 </p>
 
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
   <a href="#소스에서-실행">소스에서 실행</a> ·
   <a href="CONTRIBUTING.md">기여 가이드</a> ·
-  <a href="https://github.com/seungan123/downloads-organizer/issues">이슈</a>
+  <a href="https://github.com/downloads-organizer-team/downloads-organizer/issues">이슈</a>
 </p>
 
 ![파일 검토 화면. 네트워크와 영양학 그룹이 추천되고, 파일 목록에서 각 파일의 소속과 판정 근거를 살펴볼 수 있습니다.](docs/file-review.png)
@@ -37,7 +37,7 @@
 
 ## 빠른 시작
 
-1. **앱 열기** — [Windows 배포 페이지](https://github.com/seungan123/downloads-organizer/releases/tag/v1.0.0)의 **Assets**에서 `downloads-organizer-windows-x64.zip`을 받아 압축을 풀고 `start.cmd`를 두 번 클릭합니다. ZIP에 Electron과 Python이 들어 있습니다.
+1. **앱 열기** — [Windows 배포 페이지](https://github.com/downloads-organizer-team/downloads-organizer/releases/tag/v1.0.0)의 **Assets**에서 `downloads-organizer-windows-x64.zip`을 받아 압축을 풀고 `start.cmd`를 두 번 클릭합니다. ZIP에 Electron과 Python이 들어 있습니다.
 2. **추천 확인** — 앱이 내 다운로드 폴더를 분석하면 **파일 검토**에서 그룹을 고릅니다. 파일 이름을 누르면 추천 이유가 보입니다.
 3. **폴더로 이동** — 전체 목록의 **폴더로 정리** 또는 선택한 그룹의 **이 그룹 정리**를 누릅니다. 미리보기에서 목적지를 확인하고 **○개 파일 이동**을 누르면 파일이 옮겨집니다.
 
@@ -68,7 +68,7 @@ Edge나 Chrome을 연결하면 이후에 받는 파일의 상세 화면에서 �
 Windows x64에서 Git, Python 3.13, Node.js 22.12 이상과 npm을 준비합니다. PowerShell에서 `python.exe --version`으로 Python 경로를 확인하세요. 처음 실행할 때 `npx`가 Electron을 내려받습니다.
 
 ```powershell
-git clone https://github.com/seungan123/downloads-organizer.git
+git clone https://github.com/downloads-organizer-team/downloads-organizer.git
 cd downloads-organizer
 npx.cmd --yes electron@45.3.3 ./desktop
 ```
