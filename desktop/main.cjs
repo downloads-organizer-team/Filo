@@ -5,7 +5,7 @@ const {createInterface} = require("node:readline");
 const path = require("node:path");
 
 const root = path.dirname(__dirname);
-const allowed = new Set(["scan","options","detail","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
+const allowed = new Set(["scan","options","sources","search","chooseFolder","detail","related","history","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
 const pending = new Map();
 let window, child, sequence=0, mutating=false;
 
@@ -50,6 +50,10 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
   if (action==="execute" && mutating) return {ok:false,error:"파일을 처리하고 있습니다."};
   if (action==="execute") mutating=true;
   try {
+    if (action==="chooseFolder") {
+      const selected=await dialog.showOpenDialog(window,{title:"폴더 선택",properties:["openDirectory"]});
+      return {ok:true,value:selected.canceled?null:selected.filePaths[0]||null};
+    }
     if (action==="preview" && args.kind==="manual") {
       const selected=await dialog.showOpenDialog(window,{title:"파일을 이동할 폴더",properties:["openDirectory","createDirectory"]});
       if (selected.canceled) return {ok:true,value:null};
