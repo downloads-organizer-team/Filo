@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 from candidates import cohesion
 from course_source import relation as course_relation
+from models import Group
 
 @dataclass
 class Ranking:
-    group:object=None
+    group:Group|None=None
     affinity:float=0
     margin:float=0
     neighbor:float=0
@@ -48,13 +49,13 @@ def detect(study,groups,rules):
             f.evidence="직접 지정한 소속은 추천 신뢰도 계산에서 제외합니다."
             continue
         r=rank(study,f,groups,rules);f.confidence=r.confidence;f.evidence=r.describe()
-        if r.high and owners.get(f.index) is r.group:
+        if r.high and r.group is not None and owners.get(f.index) is r.group:
             f.group=r.group;f.first_band="높음";f.state="1차 추천";f.note="이름과 이웃 파일의 관계가 같은 묶음을 지지합니다."
             if any(m is not f and course_relation(f,m)==1 for m in f.group.members):
                 f.note="이 묶음의 다른 자료와 같은 강의 출처 단서가 다운로드 기록에 남아 있습니다."
         elif groups and (r.affinity>=.23 or (not study.vectors[f.index].literal and f.ext in SUPPORTED and
                 any(m is not f and rules.allowed(f.index,m.index) and
-                    ((f.rel==m.rel and abs(f.modified-m.modified)<=172800) or
+                    ((f.path.parent==m.path.parent and f.modified and m.modified and abs(f.modified-m.modified)<=172800) or
                      (f.download.directory and f.host==m.host and f.download.directory==m.download.directory))
                     for m in anchors))):
             f.first_band="중간";study.medium.add(f.index);f.note="묶음 간 차이가 작거나 파일명에 작업 단서가 부족합니다."

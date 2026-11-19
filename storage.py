@@ -10,12 +10,14 @@ import json
 import os
 import re
 import stat
-from models import File
+from models import File, HistoryEvent
+from scanner import check_directory, file_uid
 
-HOME=Path(os.environ.get("LOCALAPPDATA",str(Path.home())))/"MoaFileReview"
+HOME=Path(os.environ["MOA_HOME"]) if os.environ.get("MOA_HOME") else Path(os.environ.get("LOCALAPPDATA",str(Path.home())))/"MoaFileReview"
 
 def downloads_folder():
     """Use the current user's Windows Downloads location, including redirections."""
+    if os.environ.get("MOA_DOWNLOADS"):return Path(os.environ["MOA_DOWNLOADS"]).absolute()
     folder_id = (ctypes.c_ubyte * 16).from_buffer_copy(
         UUID("374DE290-123F-4565-9164-39C4925E467B").bytes_le)
     get_path = ctypes.windll.shell32.SHGetKnownFolderPath
@@ -46,10 +48,33 @@ def scan_options():
             continue
     return False,True,True
 
-def remember_options(recursive,deep,course_covers=True):
+def source_roots():
+    default=downloads_folder().absolute()
+    try:
+        value=json.loads((HOME/"download-settings.json").read_text(encoding="utf-8"))
+        roots=value.get("roots",[]) if isinstance(value,dict) else []
+    except (OSError,ValueError):roots=[]
+    return list(dict.fromkeys([str(default)]+[str(Path(p)) for p in roots
+                              if isinstance(p,str) and Path(p).is_absolute()]))
+
+
+def validate_roots(roots):
+    if not isinstance(roots,list) or any(not isinstance(p,str) for p in roots):
+        raise ValueError("원본 폴더 목록을 확인하세요.")
+    result=[]
+    keys=set()
+    for value in [str(downloads_folder().absolute()),*roots]:
+        path=check_directory(Path(value))
+        key=os.path.normcase(str(path))
+        if key not in keys:result.append(str(path));keys.add(key)
+    return result
+
+
+def remember_options(recursive,deep,course_covers=True,roots=None):
     try:
         HOME.mkdir(parents=True,exist_ok=True)
-        save(HOME/"download-settings.json",dict(recursive=recursive,deep=deep,course_covers=course_covers))
+        save(HOME/"download-settings.json",dict(recursive=recursive,deep=deep,course_covers=course_covers,
+                                               roots=source_roots() if roots is None else list(map(str,roots))))
     except OSError:pass
 
 def sample():
@@ -95,6 +120,9 @@ class FolderMove:
     file: File
     target: Path
     skip: str = ""
+    roots: tuple[Path,...] = ()
+    destination: Path | None = None
+    mode: str = "new"
 
 
 def folder_name(title):
@@ -105,17 +133,27 @@ def folder_name(title):
     return name
 
 
-def check_group_paths(root, source, target):
-    if (target.parent.parent != root or not source.is_relative_to(root)
-            or source.resolve() != source or target.parent.resolve() != target.parent):
+def check_group_paths(root, source, target, roots=None, mode="new"):
+    root=check_directory(root)
+    roots=tuple(map(Path,roots)) if roots else (root,)
+    if (not source.is_absolute() or not target.is_absolute()
+            or not any(source.is_relative_to(p) and source!=p for p in roots)
+            or source.resolve()!=source or target.parent.resolve()!=target.parent
+            or (target.parent.parent!=root if mode=="new" else target.parent!=root)):
         raise OSError("다운로드 안의 원래 경로를 확인할 수 없습니다.")
+    for source_root in roots:check_directory(source_root)
+    check_directory(source.parent)
     if os.path.lexists(target.parent):
         info = target.parent.lstat()
-        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
             raise OSError("그룹 폴더 위치에 파일 또는 연결 경로가 있습니다.")
 
 
-def plan_group_folders(study, selected=None):
+def plan_group_folders(study, selected=None, destination=None, mode="new"):
+    if mode not in ("new","existing"):raise ValueError("대상 폴더 방식을 확인하세요.")
+    if mode=="existing" and destination is None:raise ValueError("대상 폴더를 선택하세요.")
+    destination=check_directory(Path(destination) if destination is not None else study.root)
+    roots=tuple(study.roots or [study.root])
     plan = []
     names = set()
     reserved = set()
@@ -130,10 +168,10 @@ def plan_group_folders(study, selected=None):
         if selected is not None and group is not selected:
             continue
         for file in sorted(group.members, key=lambda f: str(f.path).casefold()):
-            target = study.root / name / file.name
+            target = destination / name / file.name if mode=="new" else destination / file.name
             skip = ""
             try:
-                check_group_paths(study.root, file.path, target)
+                check_group_paths(destination, file.path, target, roots, mode)
                 if target == file.path:
                     skip = "이미 정리됨"
                 elif os.path.lexists(target) or target in reserved:
@@ -142,7 +180,7 @@ def plan_group_folders(study, selected=None):
                     reserved.add(target)
             except (OSError, RuntimeError) as error:
                 skip = str(error)
-            plan.append(FolderMove(file, target, skip))
+            plan.append(FolderMove(file, target, skip, roots, destination, mode))
     return plan
 
 
@@ -160,12 +198,18 @@ def move_files(plan, group_root=None):
             report.append(f"건너뜀   {f.name}   ·   {item.skip}")
             continue
         try:
-            if group_root is not None:check_group_paths(group_root,f.path,target)
-            st=f.path.stat()
+            destination=item.destination or group_root
+            roots=item.roots or ((Path(group_root),) if group_root is not None else ())
+            if destination is not None:check_group_paths(destination,f.path,target,roots,item.mode)
+            st=f.path.lstat()
+            if (stat.S_ISLNK(st.st_mode) or getattr(st,"st_file_attributes",0)&stat.FILE_ATTRIBUTE_REPARSE_POINT
+                    or file_uid(f.path,st)!=f.uid):raise OSError("분석 후 파일 변경")
             if (st.st_size,st.st_mtime_ns)!=(f.size,f.mtime_ns):raise OSError("분석 후 파일 변경")
             if os.path.lexists(target) or target in reserved:raise OSError("같은 이름 또는 같은 위치")
-            row=dict(src=str(f.path),dst=str(target),sha=checksum(f.path),status="planned")
-            if group_root is not None:row["group_root"]=str(group_root)
+            row:dict[str,str|int|list[str]]=dict(src=str(f.path),dst=str(target),sha=checksum(f.path),status="planned",
+                     uid=f.uid,size=f.size,mtime_ns=f.mtime_ns)
+            if destination is not None:
+                row.update(group_root=str(destination),source_roots=list(map(str,roots)),destination_mode=item.mode)
             rows.append(row)
             reserved.add(target)
         except (OSError,RuntimeError) as ex:report.append("건너뜀   "+f.name+"   ·   "+str(ex))
@@ -174,19 +218,25 @@ def move_files(plan, group_root=None):
     for r in rows:
         src=Path(r["src"]);dst=Path(r["dst"])
         try:
-            if group_root is not None:
-                check_group_paths(group_root,src,dst)
-                try:
-                    dst.parent.mkdir()
-                except FileExistsError:
-                    pass
-                else:
-                    info=dst.parent.stat()
-                    r["created_dir"]=[info.st_dev,info.st_ino]
-                    save(log,rows)
-                check_group_paths(group_root,src,dst)
+            if r.get("group_root"):
+                destination=Path(r["group_root"])
+                check_group_paths(destination,src,dst,r.get("source_roots"),r.get("destination_mode","new"))
+                if r.get("destination_mode","new")=="new":
+                    try:
+                        dst.parent.mkdir()
+                    except FileExistsError:
+                        pass
+                    else:
+                        info=dst.parent.stat()
+                        r["created_dir"]=[info.st_dev,info.st_ino]
+                        save(log,rows)
+                check_group_paths(destination,src,dst,r.get("source_roots"),r.get("destination_mode","new"))
+            st=src.lstat()
+            if ((st.st_size,st.st_mtime_ns)!=(r["size"],r["mtime_ns"])
+                    or file_uid(src,st)!=r["uid"] or checksum(src)!=r["sha"]):
+                raise OSError("분석 후 파일 변경")
             relocate(src,dst);r["status"]="moved"
-            report.append("이동 완료   "+str(dst.relative_to(group_root) if group_root else dst))
+            report.append("이동 완료   "+str(dst))
         except (OSError,RuntimeError) as ex:r["status"]="failed";report.append("건너뜀   "+src.name+"   ·   "+str(ex))
         save(log,rows)
     remove_empty_group_dirs(rows)
@@ -214,13 +264,25 @@ def latest():
         if any(map(pending,rows)):return p,rows
     return None,[]
 
+def recent_history() -> list[HistoryEvent]:
+    result=[]
+    for path in sorted((HOME/"History").glob("*.json"),reverse=True)[:10]:
+        rows=json.loads(path.read_text(encoding="utf-8"))
+        stamp=datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y.%m.%d %H:%M")
+        result.append(HistoryEvent(time=stamp,moved=sum(r["status"] in {"moved","undone"} for r in rows),
+                                   undone=sum(r["status"]=="undone" for r in rows),
+                                   pending=sum(pending(r) for r in rows),
+                                   files=[Path(r["src"]).name for r in rows[:8]]))
+    return result
+
 def undo(path):
     rows=json.loads(path.read_text(encoding="utf-8"));report=[]
     for r in reversed(rows):
         if not pending(r):continue
         src,dst=Path(r["src"]),Path(r["dst"])
         try:
-            if r.get("group_root"):check_group_paths(Path(r["group_root"]),src,dst)
+            if r.get("group_root"):
+                check_group_paths(Path(r["group_root"]),src,dst,r.get("source_roots"),r.get("destination_mode","new"))
             if src.exists():raise OSError("원래 위치가 사용 중입니다.")
             if not dst.is_file() or checksum(dst)!=r["sha"]:raise OSError("이동 후 파일이 바뀌었거나 사라졌습니다.")
             src.parent.mkdir(parents=True,exist_ok=True);relocate(dst,src);r["status"]="undone";report.append("복원 완료   "+src.name)

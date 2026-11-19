@@ -48,13 +48,15 @@ git push -u origin docs/first-run-guide
 저장소 루트에서 아래 명령으로 전체 테스트를 실행합니다. 두 테스트 모듈은 [demo.zip](demo.zip)을 임시 폴더에 풀고 임시 데이터베이스를 사용합니다. 배포 ZIP에 포함된 Python을 쓸 때는 `python` 자리에 `.\python\python.exe`를 입력합니다.
 
 ```powershell
-python -B -m unittest -v test_pipeline test_desktop
+python -B -m unittest -v
 ```
 
 | 변경 범위 | 집중해서 확인하는 방법 |
 | --- | --- |
 | 분류 규칙·문서 판독 | `python -B -m unittest -v test_pipeline`을 실행합니다. 예제에서 함께 묶여야 할 파일과 미분류에 남아야 할 파일을 하나씩 비교합니다. |
 | 편집·미리보기·이동 | `python -B -m unittest -v test_desktop`을 실행합니다. 이동을 건너뛴 파일과 되돌린 파일의 경로를 확인하는 사례는 `test_pipeline`에도 있습니다. |
+| 복수 폴더·목적지·검토 데이터 | `python -B -m unittest -v test_sources`로 경로 중복, 충돌, 새 폴더·기존 폴더 이동과 복원, 제한된 관계 보기와 실제 정리 이력을 확인합니다. |
+| 범용 관계·검색 | `python -B -m unittest -v test_relationships test_search`를 실행합니다. 실행 중인 Everything 1.5와 실제 IPC 연결은 `python -B -X utf8 test_search.py --sdk`로 별도 확인합니다. |
 | Electron 화면·브라우저 확장 | Windows에서 바꾼 화면이나 연결 과정을 직접 따라갑니다. 파일 이동을 확인할 때는 예제 파일의 복사본으로 한 그룹만 옮기고 **최근 이동 되돌리기**까지 확인합니다. |
 | 문서 | GitHub 미리보기에서 표와 코드 블록을 읽고, 바꾼 링크와 실행 절차를 따라갑니다. |
 

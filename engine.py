@@ -13,9 +13,10 @@ from refinement import refine,summarize
 from constraints import Constraints
 import feedback
 
-def analyze(root,recursive=True,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None):
+def analyze(root,recursive=True,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,roots=None):
     start=perf_counter()
-    s=Study(Path(root).resolve(),deep)
+    s=Study(Path(root).absolute(),deep)
+    s.roots=[Path(p).absolute() for p in roots] if roots is not None else [s.root]
     status("파일 스캔 중");scan(s,recursive,stop)
     status("파일명과 메타데이터 분석 중");extract(s.files,stop)
     saved=feedback.load(s.files);s.revision=saved.revision

@@ -28,7 +28,7 @@ def assign_title(study,group,rules,read_covers=False):
     literal=Counter(k for vec in vectors for k in vec.literal if not SESSION_LABEL.fullmatch(k))
     context=Counter(k for vec in vectors for k in vec.context)
     shared=[k for k,n in literal.items() if n==len(vectors)]
-    group.title_note=note or "파일명에서 추정한 주제 · 정식 과목명 확인 필요"
+    group.title_note=note or "파일명에서 추정한 작업 · 그룹 이름을 확인하세요"
     if shared:
         group.title=min(shared,key=lambda k:(-study.idf.get(k,0),k))
     elif context:
@@ -40,7 +40,7 @@ def assign_title(study,group,rules,read_covers=False):
                            if (m:=re.search(re.escape(token),f.path.stem,re.I))),token)
             topics.append(spelling)
         group.title=" · ".join(topics) or ("강의 자료" if scope else "이름 미정")
-        group.title_note=note or "임시 이름 · 과목명을 확인할 수 있어요"
+        group.title_note=note or "임시 이름 · 그룹 이름을 직접 정할 수 있어요"
 
 def make(study,clusters,constraints):
     groups=[]
