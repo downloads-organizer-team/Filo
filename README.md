@@ -20,9 +20,9 @@
   <a href="https://github.com/downloads-organizer-team/downloads-organizer/issues">이슈</a>
 </p>
 
-![묶음 목록, 파일 목록, 선택한 파일의 관계를 나란히 보는 파일 검토 화면.](docs/review-workspace.png)
+![묶음과 파일 목록 옆에 관련 파일명과 숫자가 들어간 색상 원을 표시하는 최신 관계 보기 화면.](docs/review-workspace.png)
 
-<p align="center"><sub>여행 준비 예제 · 서로 다른 폴더의 PDF·PNG·XLSX를 함께 검토하는 실제 앱 화면입니다.</sub></p>
+<p align="center"><sub>여행 준비 예제 · 관련 파일명과 관련도 숫자를 간결하게 표시합니다. 파일명을 누르면 상세 근거가 열립니다.</sub></p>
 
 <details>
 <summary><strong>목차</strong></summary>
