@@ -182,8 +182,12 @@ function relatedContent(f){
   if(relatedBusy)return center+'<p class="empty" role="status">연결된 파일을 확인하는 중…</p>';
   if(relatedError)return center+'<p class="empty" role="alert">'+esc(relatedError)+'</p>'+btn("retryRelated","다시 시도","arrows-clockwise");
   const rows=relatedRows||[];
-  return '<p class="related-caption">선택한 파일을 중심으로 관련 파일 최대 5개만 표시합니다. 연결은 실제 파일 이동을 뜻하지 않습니다.</p>'+center+
-    (rows.length?'<ol class="related-list">'+rows.map(r=>'<li><button class="related-file" data-related-file="'+esc(r.id)+'"><span class="relation-node" aria-hidden="true"></span><strong>'+esc(r.name)+'</strong><span class="related-meta">'+esc(groups.get(r.group)?.title||"미분류")+' · 관련도 '+(Number(r.score)/100).toFixed(2)+'</span></button><p class="related-signals">'+esc(r.signals.join(" · ")||"현재 묶음에서 함께 검토하는 파일")+'</p></li>').join("")+'</ol>':'<p class="empty">현재 연결된 파일이 없습니다. 다른 파일을 선택해 살펴보세요.</p>');
+  return '<p class="related-caption">관련 파일 최대 5개 · 파일명을 누르면 상세 근거가 열립니다.</p>'+center+
+    (rows.length?'<ol class="related-list">'+rows.map(r=>{
+      const score=Number(r.score),band=score>=60?"high":score>=35?"medium":"low";
+      const label=score>=60?"높음":score>=35?"보통":"낮음";
+      return '<li><button class="related-file" data-related-file="'+esc(r.id)+'" aria-label="'+esc(r.name)+' 상세 보기, 관련도 '+score+'점, '+label+'"><span class="relation-score '+band+'" title="관련도 '+score+'/100 · '+label+'" aria-hidden="true">'+score+'</span><strong>'+esc(r.name)+'</strong></button></li>';
+    }).join("")+'</ol><p class="relation-legend">관련도 / 100 · 초록 60 이상 · 노랑 35–59 · 빨강 34 이하</p>':'<p class="empty">현재 연결된 파일이 없습니다. 다른 파일을 선택해 살펴보세요.</p>');
 }
 async function loadRelated(){
   if(activeId===null||!detailInfo||relatedBusy)return;
