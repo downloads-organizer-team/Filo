@@ -10,12 +10,21 @@ from course_source import relation as course_relation
 from features import SERIES, VERSION, YEAR, task_name
 from models import Group
 from scanner import check_directory
-from topics import NOISE, activity_relation, opaque_format, words
+from topics import NOISE, REFERENCE, activity_relation, opaque_format, reference_key, words
 
 
 def identity(text):
-    return tuple(w for w in words(SERIES.sub(" ", VERSION.sub(" ", text)))
-                 if len(w)>1 and not w.isdecimal() and w not in NOISE and not opaque_format(w))
+    # Preserve the serial when tokenizing e.g. AB-12345 and AB12345.
+    codes=set()
+    def normalize(match):
+        code=reference_key(match).replace("-","").casefold()
+        if code:codes.add(code)
+        return code or match[0]
+    text=REFERENCE.sub(normalize,text)
+    tokens=tuple(w for w in words(SERIES.sub(" ", VERSION.sub(" ", text)))
+                 if w in codes or (w not in NOISE and not YEAR.fullmatch(w) and not opaque_format(w)))
+    # A number or a single character can distinguish names, but is weak by itself.
+    return tokens if any(len(w)>1 and not w.isdecimal() for w in tokens) else ()
 
 
 def folder_index(roots, stop):

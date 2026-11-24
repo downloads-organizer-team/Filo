@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from features import LEXICON, ALIASES, TASK_GENERIC, TASK_SEPARATOR, VERSION, clean, tokenize, task_name, task_prefixes
 from models import Vector
 import course_source
-from topics import activities, activity_relation, opaque_format
+from topics import TAG, activities, activity_relation, display, opaque_format
 import re
 
 NEIGHBORS={}
@@ -131,8 +131,14 @@ def prepare(study):
             study.download_times.append(None)
     df=Counter(w for f in study.files for w in set(f.tokens))
     study.idf={w:1+log((len(study.files)+1)/(n+1)) for w,n in df.items()}
-    study.vectors=[vector(() if fmt else (w for w in f.tokens if w not in authors), study.idf)
-                   for f,fmt in zip(study.files,study.opaque_formats)]
+    study.vectors=[]
+    for f,fmt in zip(study.files,study.opaque_formats):
+        stem=display(f.path.stem)
+        labels={tag.casefold() for tag in TAG.findall(stem)}
+        if labels:
+            labels.difference_update(tokenize(TAG.sub(" ",stem)))
+        study.vectors.append(vector(() if fmt else (w for w in f.tokens if w not in authors and w not in labels),
+                                    study.idf))
     known={p for p in study.task_prefixes if p}
     for i,f in enumerate(study.files):
         parent,_=task_name(f.path.parent.name+"_file")

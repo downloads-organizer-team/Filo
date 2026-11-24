@@ -169,7 +169,7 @@ def check_group_paths(root, source, target, roots=None, mode="new"):
             raise OSError("그룹 폴더 위치에 파일 또는 연결 경로가 있습니다.")
 
 
-def plan_group_folders(study, selected=None, destination=None, mode="new"):
+def plan_group_folders(study, selected=None, destination=None, mode="new", *, file_ids=None):
     if mode not in ("new","existing","reuse"):raise ValueError("대상 폴더 방식을 확인하세요.")
     if mode=="existing" and destination is None:raise ValueError("대상 폴더를 선택하세요.")
     destination=check_directory(Path(destination) if destination is not None else study.root)
@@ -187,6 +187,9 @@ def plan_group_folders(study, selected=None, destination=None, mode="new"):
         names.add(name.casefold())
         if selected is not None and group is not selected:
             continue
+        members=[f for f in group.members if file_ids is None or f.index in file_ids]
+        if not members:
+            continue
         reuse=group.destination if mode=="reuse" else None
         parent=reuse or destination
         move_mode="existing" if reuse or mode=="existing" else "new"
@@ -194,7 +197,7 @@ def plan_group_folders(study, selected=None, destination=None, mode="new"):
         if move_mode=="existing":
             info=check_directory(parent).stat()
             folder_id=(info.st_dev,info.st_ino)
-        for file in sorted(group.members, key=lambda f: str(f.path).casefold()):
+        for file in sorted(members, key=lambda f: str(f.path).casefold()):
             target = parent / name / file.name if move_mode=="new" else parent / file.name
             skip = ""
             try:

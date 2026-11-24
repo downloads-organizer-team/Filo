@@ -92,7 +92,10 @@ class Desktop:
     def detail(self,args):
         f=self.file(args["id"])
         clock=lambda t:datetime.fromtimestamp(t).strftime("%Y.%m.%d %H:%M")
-        return dict(note=f.note,evidence=f.evidence,normalized=f.normalized,sequence=f.sequence,
+        evidence=f.evidence
+        if f.group and f.group.title_note and f.group.title_note!=f.note:
+            evidence=f.group.title_note+"\n"+(evidence or "")
+        return dict(note=f.note,evidence=evidence,normalized=f.normalized,sequence=f.sequence,
                     versions=f.versions,tokens=f.tokens,roles=f.roles,path=str(f.path),
                     created=clock(f.created),modified=clock(f.modified),excerpt=f.excerpt_status,
                     course=f.download.course_name,page=f.download.page_title,source_page=f.download.source_page,
@@ -140,8 +143,10 @@ class Desktop:
         else:
             s=self.study
             if kind=="organize":
+                file_ids={f.index for f in self.selected(args)} if "files" in args else None
                 plan=storage.plan_group_folders(s,self.group(args.get("group")),
-                                               args.get("destination"),args.get("destinationMode",s.folder_mode))
+                                               args.get("destination"),args.get("destinationMode",s.folder_mode),
+                                               file_ids=file_ids)
             elif kind=="manual":
                 destination=storage.check_directory(Path(args["destination"]))
                 plan=[storage.FolderMove(f,destination/f.name,"같은 이름의 파일이 있습니다" if (destination/f.name).exists() else "",

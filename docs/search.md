@@ -48,10 +48,13 @@ Everything을 사용할 수 없을 때는 로컬 드라이브의 루트에서 �
 python -B -X utf8 -m unittest discover -v
 python -B -X utf8 file_search.py Everything.exe
 python -B -X utf8 test_search.py --sdk
+python -B -X utf8 test_search.py --sdk "C:\Program Files\Everything\Everything.exe"
 python -B test_relationships.py --benchmark
 ```
 
 첫 명령은 기존 분류·이동 회귀와 복수 폴더·검색 회귀를 실행합니다. 두 번째는 실행 중인 Everything 1.5에 직접 질의합니다. `--sdk`는 Electron처럼 서비스 입력 파이프를 열어 둔 상태에서 실제 SDK 백엔드와 설치된 `Everything.exe` 검색 결과를 확인합니다. Everything이 실행되지 않은 환경에서는 명시적으로 실패하는 선택 검증이며, 단위 테스트에서 조용히 건너뛰는 검사가 아닙니다.
+
+실행 파일 경로를 함께 주면 테스트가 임시 폴더만 색인하는 별도 Everything 1.5 인스턴스를 열고, 합성 파일을 찾은 뒤 종료합니다.
 
 측정은 파일 수, 파일명 구성, 본문 분석 여부, 실행 환경과 결과 묶음을 함께 기록합니다. 합성 자료의 실행 시간을 모든 실제 폴더의 성능으로 일반화하지 않습니다.
 

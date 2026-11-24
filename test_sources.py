@@ -128,6 +128,23 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(conflict.read_text(),"collision")
         self.assertTrue(all(f.path.exists() for f in group.members))
 
+    def test_only_checked_source_reserves_destination_and_moves(self):
+        for root,value in [(self.root,"keep"),(self.extra,"move")]:
+            (root/"same.txt").write_text(value)
+        group=self.grouped()
+        moving=next(f for f in group.members if f.path.parent==self.extra)
+        args=dict(kind="organize",destinationMode="existing",destination=str(self.destination))
+        self.assertEqual(self.call("preview",files=[],**args)["rows"],[])
+        preview=self.call("preview",files=[moving.index],**args)
+        self.assertEqual([(r["source"],r["skip"]) for r in preview["rows"]],[(str(moving.path),"")])
+        self.call("execute",token=preview["token"])
+        self.assertEqual((self.root/"same.txt").read_text(),"keep")
+        self.assertEqual((self.destination/"same.txt").read_text(),"move")
+        self.assertFalse(moving.path.exists())
+        undo=self.call("preview",kind="undo")
+        self.call("execute",token=undo["token"])
+        self.assertEqual(moving.path.read_text(),"move")
+
     def test_stale_source_and_settings_invalidate_preview(self):
         source=self.extra/"alpha.txt";source.write_text("alpha")
         self.grouped()

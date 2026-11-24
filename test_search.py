@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from threading import Timer
-from time import perf_counter
+from time import perf_counter, sleep
 import unittest
 from unittest.mock import patch
 
@@ -109,7 +109,7 @@ class SearchTests(unittest.TestCase):
             file_search.folder_search("trip",[str(self.extra)],cancel_during_directory_read)
 
 
-def verify_live_sdk():
+def verify_live_sdk(query="Everything.exe",expected=None):
     """Opt-in real IPC proof: python -B -X utf8 test_search.py --sdk."""
     with TemporaryDirectory(prefix="moa-sdk-") as temporary:
         environment=dict(os.environ,MOA_HOME=temporary,MOA_DOWNLOADS=temporary)
@@ -124,7 +124,7 @@ def verify_live_sdk():
             deadline.start()
             try:
                 started=perf_counter()
-                service.stdin.write(json.dumps(dict(id=1,action="search",args=dict(query="Everything.exe")))+"\n")
+                service.stdin.write(json.dumps(dict(id=1,action="search",args=dict(query=query)))+"\n")
                 service.stdin.flush()
                 # Keep stdin open, exactly as Electron does while awaiting a reply.
                 response=json.loads(service.stdout.readline())
@@ -133,8 +133,8 @@ def verify_live_sdk():
                 assert result["backend"]=="Everything 1.5 SDK",result
                 assert result["total"]>=len(result["results"])
                 assert len({r["path"] for r in result["results"]})==len(result["results"])
-                assert any(Path(r["path"]).is_file() and r["name"].casefold()=="everything.exe"
-                           for r in result["results"]),result
+                matches=[Path(r["path"]) for r in result["results"] if r["name"].casefold()==query.casefold()]
+                assert any(p.is_file() and (expected is None or p==expected) for p in matches),result
                 print(json.dumps(dict(scenario="live SDK through open-stdin desktop IPC",
                                       backend=result["backend"],elapsed_ms=result["elapsed"],
                                       total_ms=round((perf_counter()-started)*1000),passed=True)))
@@ -145,6 +145,40 @@ def verify_live_sdk():
                 deadline.cancel()
 
 
+def verify_isolated_sdk(executable):
+    with TemporaryDirectory(prefix="organizer-sdk-") as temporary:
+        base=Path(temporary)
+        inbox=base/"Inbox"
+        inbox.mkdir()
+        sample=inbox/"색인 확인 [42].txt"
+        sample.touch()
+        name=base.name
+        ini=base/"Everything.ini"
+        ini.write_text("[Everything]\nrun_as_admin=0\nshow_in_tray=0\n",encoding="utf-8")
+        proc=subprocess.Popen([executable,"-instance",name,"-config",str(ini),"-no-db",
+                               "-volumes","","-folders",str(inbox),"-startup"],cwd=base)
+        try:
+            with patch.dict(os.environ,MOA_EVERYTHING_INSTANCE=name):
+                deadline=perf_counter()+15
+                while perf_counter()<deadline:
+                    result=file_search.search(sample.name,roots=[])
+                    if result["backend"]=="Everything 1.5 SDK" and result["results"]:
+                        break
+                    sleep(.2)
+                else:
+                    raise AssertionError("The isolated Everything instance did not index the test file")
+                verify_live_sdk(sample.name,sample)
+        finally:
+            if proc.poll() is None:
+                try:
+                    subprocess.run([executable,"-instance",name,"-exit"],timeout=5,check=True)
+                    proc.wait(timeout=5)
+                except (subprocess.TimeoutExpired,subprocess.CalledProcessError):
+                    proc.terminate()
+                    proc.wait(timeout=5)
+
+
 if __name__=="__main__":
     if sys.argv[1:]==["--sdk"]:verify_live_sdk()
+    elif len(sys.argv)==3 and sys.argv[1]=="--sdk":verify_isolated_sdk(sys.argv[2])
     else:unittest.main()

@@ -1,11 +1,12 @@
 """Complete-link agglomeration with a reciprocal nearest-neighbour chain."""
 from confidence import affinity_floor
 from course_source import relation
+from topics import activity_relation
 
 
 def supported_pair(study,i,j):
     a,b=study.files[i],study.files[j]
-    return (study.activities[i] is not None and study.activities[i]==study.activities[j]
+    return (activity_relation(study.activities[i],study.activities[j])==1
             or study.opaque_formats[i] and study.opaque_formats[j]
             or study.task_prefixes[i] and study.task_prefixes[i]==study.task_prefixes[j]
             or not study.vectors[i].literal.keys().isdisjoint(study.vectors[j].literal)

@@ -54,6 +54,7 @@ python -B -m unittest -v
 | 변경 범위 | 집중해서 확인하는 방법 |
 | --- | --- |
 | 분류 규칙·문서 판독 | `python -B -m unittest -v test_pipeline`을 실행합니다. 예제에서 함께 묶여야 할 파일과 미분류에 남아야 할 파일을 하나씩 비교합니다. |
+| 특정 폴더에 치우치는 분류 | `python -B -X utf8 test_generalization.py --measure`로 합성 파일의 잘못 묶인 쌍, 놓친 쌍, 예상 이름과 일치한 묶음 수를 확인합니다. `python -B -m unittest test_generalization`은 파일명·단어 순서·배치가 다른 경우도 검사합니다. |
 | 편집·미리보기·이동 | `python -B -m unittest -v test_desktop`을 실행합니다. 이동을 건너뛴 파일과 되돌린 파일의 경로를 확인하는 사례는 `test_pipeline`에도 있습니다. |
 | 복수 폴더·목적지·검토 데이터 | `python -B -m unittest -v test_sources`로 경로 중복, 충돌, 새 폴더·기존 폴더 이동과 복원, 제한된 관계 보기와 실제 정리 이력을 확인합니다. |
 | 범용 관계·검색 | `python -B -m unittest -v test_relationships test_search`를 실행합니다. 실행 중인 Everything 1.5와 실제 IPC 연결은 `python -B -X utf8 test_search.py --sdk`로 별도 확인합니다. |

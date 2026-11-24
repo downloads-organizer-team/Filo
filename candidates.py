@@ -33,7 +33,7 @@ def assign_title(study,group,rules,read_covers=False):
         suffix=" "+next(iter(editions))+"기" if activity.kind=="프로그램" and len(editions)==1 else ""
         group.title=activity.title+suffix
         group.title_kind="activity"
-        group.title_note=f"파일 이름에 공통으로 나타난 {activity.kind} 이름 · {group.title}"
+        group.title_note=f"파일명에 공통으로 적힌 {activity.kind} · {group.title}"
         return
     if all(study.opaque_formats[f.index] for f in group.members) and all(
             study.primary[a.index][b.index]>=82 for i,a in enumerate(group.members) for b in group.members[:i]):

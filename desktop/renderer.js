@@ -131,7 +131,7 @@ function liveSearch(){
       $("#search-meta").textContent=result.backend+" · "+count+" · "+result.note;
       $("#search-rows").innerHTML=result.results.map(r=>{
         const glyph=r.icon?'<img class="shell-icon" src="'+esc(r.icon)+'" alt="">':icon(r.isFolder?"folder-open":"file-text");
-        return '<tr><td><span class="search-name" title="'+esc(r.name)+'">'+glyph+'<span>'+esc(r.name)+'</span></span></td><td title="'+esc(r.path)+'">'+esc(r.path)+'</td></tr>';
+        return '<tr><td><span class="search-name" title="'+esc(r.name)+'">'+glyph+'<span>'+esc(r.name)+'</span></span></td><td><div class="search-path"><span title="'+esc(r.path)+'">'+esc(r.path)+'</span><button class="icon-btn" data-copy-path="'+esc(r.path)+'" title="경로 복사" aria-label="'+esc(r.name)+' 경로 복사">'+icon("copy")+'</button></div></td></tr>';
       }).join("");
       $("#search-empty").hidden=!!result.results.length;
       $("#search-empty").textContent=result.total==null?"확인한 범위에서 일치하는 이름을 찾지 못했습니다.":"일치하는 파일이나 폴더가 없습니다.";
@@ -164,11 +164,19 @@ function render(){
   else flow();
 }
 function editableIds(){return selected.size?[...selected]:activeId!==null?[activeId]:[];}
+function moveCandidates(){
+  const listed=view==="review"?visibleFiles():data?.files||[];
+  const ids=view==="review"?new Set(editableIds()):new Set();
+  return listed.filter(f=>f.group&&(!ids.size||ids.has(f.id)));
+}
 function updateReviewBar(){
-  const eligible=(view==="review"?scopeFiles():data?.files||[]).filter(f=>f.group);
+  const eligible=moveCandidates();
   $("#organize").disabled=busy||!eligible.length;
-  $("#review-count").textContent=(view==="review"&&scope?scope==="hold"?"미분류 파일":groups.get(scope)?.title||"현재 묶음":"전체 추천 묶음")+" · 이동 대상 "+eligible.length+"개";
-  $("#review-hint").textContent=eligible.length?"확정하기 전에 파일별 원래 경로와 목적지를 확인하세요.":"미분류 파일은 묶음을 지정하거나 선택 편집에서 개별 이동하세요.";
+  const label=view!=="review"?"전체 추천 묶음":selected.size?"체크한 파일":activeId!==null?"현재 선택한 파일":
+    query.trim()?"필터 결과":scope==="hold"?"미분류 파일":groups.get(scope)?.title||"전체 추천 묶음";
+  $("#review-count").textContent=label+" · 이동 대상 "+eligible.length+"개";
+  $("#review-hint").textContent=eligible.length?"미리보기에서 원래 경로와 이동할 폴더를 확인하세요.":
+    query.trim()&&!visibleFiles().length?"필터에 맞는 파일이 없습니다.":"미분류 파일은 묶음을 지정하거나 직접 이동할 수 있어요.";
 }
 function review(){
   const g=groups.get(scope),all=scopeFiles();
@@ -176,7 +184,16 @@ function review(){
     '<div id="selection-bar" class="selection-bar"><span id="selection-count">파일 선택</span><div class="selection-actions"><button class="btn" data-file-edit="assign">'+icon("folder-notch-open")+'다른 묶음</button><button class="btn" data-file-edit="unclassify">미분류로</button><button class="btn" data-file-edit="create">'+icon("plus")+'새 묶음</button>'+ib("groupMenu","dots-three","선택 파일 추가 편집")+'</div></div>'+
     '<div class="table-scroll" tabindex="0" aria-label="파일 목록 스크롤"><table><thead><tr><th class="checkbox"><input id="all-check" type="checkbox" aria-label="필터 결과 전체 선택"></th><th class="name-col">파일명 · 원래 위치</th><th class="group-col">묶음</th><th class="score-col">신뢰도</th><th class="open-col"></th></tr></thead><tbody id="file-rows"></tbody></table><div id="empty" class="empty" hidden></div></div><div class="table-foot"><span id="row-summary"></span><span id="page-tools"></span></div></section>'+
     '<button id="detail-scrim" data-action="closeDetail" aria-label="파일 목록으로 돌아가기" hidden></button><aside id="file-inspector" class="file-inspector" aria-label="선택한 파일 근거" tabindex="-1"><div class="inspector-heading"><h2>파일 근거</h2>'+btn("closeDetail","목록으로","arrow-left")+'</div><div id="inspector-body" class="inspector-body"><div class="inspector-empty">'+icon("file-magnifying-glass")+'<h3>파일의 연결을 살펴보세요</h3><p>목록에서 파일을 선택하면 원래 위치와 수정 시각, 추천 근거를 확인할 수 있어요.</p></div></div></aside></div>';
-  $("#search").oninput=e=>{query=e.target.value;page=0;rows();};rows();syncInspector();
+  $("#search").oninput=e=>{
+    query=e.target.value;page=0;
+    const visible=new Set(visibleFiles().map(f=>f.id));
+    for(const id of selected)if(!visible.has(id))selected.delete(id);
+    if(activeId!==null&&!visible.has(activeId)){
+      activeId=null;detailInfo=null;detailOpen=false;detailVersion++;
+      $("#inspector-body").innerHTML='<p class="empty">파일을 누르면 추천 근거를 볼 수 있어요.</p>';syncInspector();
+    }
+    rows();
+  };rows();syncInspector();
   if(activeId!==null&&files.has(activeId))detail(activeId,false).catch(errorDialog);
 }
 function rows(){
@@ -193,6 +210,7 @@ function rows(){
   $("#selection-count").innerHTML=ids.length?'<strong>'+ids.length+'개 선택</strong><button data-action="deselect">해제</button>':'파일을 선택해 분류';
   document.querySelectorAll('[data-file-edit],[data-action="groupMenu"]').forEach(b=>b.disabled=busy||!ids.length);
   if(focusedCheck!==undefined)$('[data-check="'+focusedCheck+'"]')?.focus();
+  updateReviewBar();
 }
 function infoRows(items){return '<dl class="info-list">'+items.filter(([,v])=>v!==undefined && v!==null && v!=="").map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>').join("")+'</dl>';}
 function syncInspector(){
@@ -252,7 +270,6 @@ async function historyDialog(){
 }
 function groupMenu(){
   const items=[],ids=editableIds();
-  selected=new Set(ids);
   const g=groups.get(scope)||groups.get(files.get(ids[0])?.group);
   const add=(type,label,glyph)=>items.push('<button class="menu-btn" data-edit="'+type+'" data-group="'+esc(g?.id||"")+'">'+icon(glyph)+esc(label)+'</button>');
   if(ids.length){add("assign","다른 그룹으로 이동","folder-notch-open");add("create","새 그룹 만들기","folder-simple-plus");add("manual","체크한 파일을 폴더로 이동","arrow-square-out");}
@@ -285,7 +302,8 @@ async function editForm(kind,gid){
   $("#value").focus();$("#value").select();
 }
 async function preview(kind,args={}){
-  const result=await call("preview",{kind,group:view==="review"&&scope!=="hold"?scope:null,files:[...selected],...args});
+  const targetFiles=kind==="organize"?moveCandidates().map(f=>f.id):editableIds();
+  const result=await call("preview",{kind,group:view==="review"&&scope!=="hold"?scope:null,files:targetFiles,...args});
   if(!result)return;
   const rows=result.rows,move=rows.filter(r=>!r.skip),byFolder=new Map();
   rows.forEach(r=>{const path=parentPath(r.target);if(!byFolder.has(path))byFolder.set(path,[]);byFolder.get(path).push(r);});
@@ -367,6 +385,7 @@ document.addEventListener("click",async e=>{
   try {
     const el=e.target.closest("button,input,tr[data-file]");if(!el)return;
     const d=el.dataset;
+    if(d.copyPath){await navigator.clipboard.writeText(d.copyPath);toast("경로를 복사했어요.");return;}
     if(d.action)return await action(d.action);
     if(busy)return;
     if(d.removeRoot!==undefined){sourceDraft.roots.splice(Number(d.removeRoot),1);renderSources();return;}

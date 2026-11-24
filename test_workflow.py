@@ -142,6 +142,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(rows),2)
         self.assertEqual({Path(r["target"]).parent.name for r in rows},{"2026 여름 프로젝트"})
 
+    def test_identifiers_remain_distinct_in_folder_reuse(self):
+        self.create("AB-203451/old.txt","AB-203452/old.txt","검수증 ab203451.xlsx",
+                    "AB-203452 송장.pdf","무제.png")
+        self.scan("reuse")
+        rows=self.app.preview(dict(kind="organize"))["rows"]
+        self.assertEqual({r["name"]:Path(r["target"]).parent.name for r in rows},
+                         {"검수증 ab203451.xlsx":"AB-203451","AB-203452 송장.pdf":"AB-203452"})
+
+    def test_existing_destination_requires_full_short_words_and_numbers(self):
+        self.create("Studio 12/old.txt","Studio 17_배송.pdf","Studio 12_지도.png",
+                    "풍경과 빛/old.txt","풍경과 꿈_계약.pdf","풍경과 빛_시안.png")
+        self.scan("reuse")
+        rows=self.app.preview(dict(kind="organize"))["rows"]
+        self.assertEqual({r["name"]:Path(r["target"]).parent.name for r in rows},
+                         {"Studio 12_지도.png":"Studio 12","풍경과 빛_시안.png":"풍경과 빛"})
+
     def test_sample_from_another_year_is_insufficient(self):
         self.create("보관함/달빛정원_2025 견적.pdf","달빛정원_2026 시안.pdf")
         self.assertFalse(self.scan("reuse")["groups"])

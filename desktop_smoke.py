@@ -16,7 +16,7 @@ def verify(executable):
         downloads,extra,state,profile=(base/k for k in ("Downloads","Projects","State","Profile"))
         for path in (downloads,extra,state):
             path.mkdir()
-        for name in ("여름 프로젝트 1주차 보고서.txt","여름 프로젝트 2주차 보고서.txt"):
+        for name in ("여름 프로젝트 1주차 보고서.txt","여름 프로젝트 2주차 보고서.txt","여름 프로젝트 3주차 보고서.txt","무제.txt"):
             (extra/name).write_text("sample",encoding="utf-8")
         (downloads/"제외한 위치.txt").touch()
         (extra/"보관").mkdir()
@@ -48,6 +48,14 @@ def verify(executable):
                 search.fill("explorer.exe")
                 expect(page.locator("#search-rows")).to_contain_text("explorer.exe",timeout=15000,ignore_case=True)
                 expect(page.locator("#search-rows img").first).to_be_visible()
+                # Keep the Windows user's clipboard intact while checking which path is copied.
+                copy=page.locator("[data-copy-path]").first
+                path=copy.get_attribute("data-copy-path")
+                assert page.evaluate("typeof navigator.clipboard.writeText")== "function"
+                page.evaluate("navigator.clipboard.writeText=async text=>{window.copiedPath=text}")
+                copy.press("Enter")
+                expect(page.locator("#toast")).to_contain_text("경로를 복사")
+                assert page.evaluate("window.copiedPath")==path
                 search.fill("")
                 expect(page.locator("#search-rows tr")).to_have_count(0)
                 page.get_by_role("button",name="파일 정리하기").click()
@@ -69,21 +77,38 @@ def verify(executable):
                 expect(dialog.locator("#source-roots")).not_to_contain_text(str(downloads))
                 dialog.get_by_role("button",name="분석 시작").click()
                 expect(page.locator("#root-path summary")).to_contain_text(str(extra))
-                expect(page.locator("#file-rows tr")).to_have_count(2)
+                expect(page.locator("#file-rows tr")).to_have_count(4)
                 page.locator("#organize").click()
-                expect(dialog.locator(".move-row")).to_have_count(2)
-                dialog.get_by_role("button",name="2개 파일 이동",exact=True).click()
+                expect(dialog.locator(".move-row")).to_have_count(3)
+                dialog.get_by_role("button",name="취소",exact=True).click()
+                filter_box=page.get_by_role("searchbox",name="현재 목록에서 파일명 필터")
+                filter_box.fill("무제")
+                expect(page.locator("#organize")).to_be_disabled()
+                filter_box.fill("2주차")
+                expect(page.locator("#review-count")).to_have_text("필터 결과 · 이동 대상 1개")
+                page.locator("#organize").click()
+                expect(dialog.locator(".move-row")).to_have_count(1)
+                expect(dialog.locator(".move-row")).to_contain_text("2주차")
+                dialog.get_by_role("button",name="취소",exact=True).click()
+                filter_box.fill("")
+                page.get_by_role("checkbox",name="여름 프로젝트 1주차 보고서.txt 선택").check()
+                expect(page.locator("#review-count")).to_have_text("체크한 파일 · 이동 대상 1개")
+                page.locator("#organize").click()
+                expect(dialog.locator(".move-row")).to_have_count(1)
+                expect(dialog.locator(".move-row")).to_contain_text("1주차")
+                dialog.get_by_role("button",name="1개 파일 이동",exact=True).click()
                 expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
-                assert len(list((extra/"여름 프로젝트").glob("*.txt")))==2
+                assert (extra/"여름 프로젝트"/"여름 프로젝트 1주차 보고서.txt").exists()
+                assert len(list(extra.glob("*.txt")))==3
                 dialog.get_by_role("button",name="닫기",exact=True).last.click()
                 page.get_by_role("button",name="파일 검색",exact=True).last.click()
                 page.get_by_role("button",name="이동 되돌리기",exact=True).click()
-                dialog.get_by_role("button",name="2개 파일 복원",exact=True).click()
+                dialog.get_by_role("button",name="1개 파일 복원",exact=True).click()
                 expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
-                assert len(list(extra.glob("*.txt")))==2
+                assert len(list(extra.glob("*.txt")))==4
                 assert (extra/"보관"/"옛 문서.txt").exists()
                 assert not errors,errors
-                print("PASS: search, shell icon, clear, folder selection, 11 thresholds, review, preview, move and undo")
+                print("PASS: live search, path copy action, 11 thresholds, roots, filtered and checked previews, move and undo")
                 page.close()
         finally:
             try:
