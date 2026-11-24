@@ -7,7 +7,7 @@ import os
 import stat
 
 from course_source import relation as course_relation
-from features import SERIES, VERSION, task_name
+from features import SERIES, VERSION, YEAR, task_name
 from models import Group
 from scanner import check_directory
 from topics import NOISE, activity_relation, opaque_format, words
@@ -29,9 +29,10 @@ def folder_index(roots, stop):
                     continue
                 try:
                     check_directory(path)
+                    folder_years = frozenset(YEAR.findall(entry.name))
                     label = identity(entry.name)
                     if label:
-                        labels[label][path] = .97
+                        labels[label][path,folder_years] = .97
                     samples = Counter()
                     with os.scandir(path) as children:
                         for child in islice(children, 100):
@@ -44,10 +45,11 @@ def folder_index(roots, stop):
                             stem = Path(child.name).stem
                             prefix, _ = task_name(stem)
                             keys = {identity(stem), identity(prefix)}
-                            samples.update(k for k in keys if k)
-                    for key, count in samples.items():
+                            sample_years = folder_years | frozenset(YEAR.findall(stem))
+                            samples.update((key,sample_years) for key in keys if key)
+                    for (key,years), count in samples.items():
                         score = .93 if count >= 2 else .84
-                        examples[key][path] = score
+                        examples[key][path,years] = score
                 except InterruptedError:
                     raise
                 except OSError:
@@ -55,11 +57,13 @@ def folder_index(roots, stop):
     return labels,examples
 
 
-def match(index, label_keys, example_keys, minimum):
+def match(index, label_keys, example_keys, minimum, source_years):
     scores = {}
     for lookup,keys in zip(index,(label_keys,example_keys)):
         for key in keys:
-            for folder, confidence in lookup.get(key, {}).items():
+            for (folder,years), confidence in lookup.get(key, {}).items():
+                if years and years != source_years:
+                    continue
                 scores[folder] = max(scores.get(folder, 0), confidence)
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
     if ranked and ranked[0][1] >= minimum and (len(ranked)==1 or ranked[0][1]-ranked[1][1] >= .08):
@@ -74,7 +78,8 @@ def recommend(study, stop):
     by_folder = defaultdict(list)
     for group in study.groups:
         titles=[identity(group.title)]
-        best = match(index, titles, titles, study.min_confidence)
+        years={year for f in group.members for year in YEAR.findall(f.path.stem)}
+        best = match(index, titles, titles, study.min_confidence, years)
         if not best:
             votes = [file_match(study, f, index) for f in group.members]
             if votes and all(v and v[0] == votes[0][0] for v in votes):
@@ -124,4 +129,4 @@ def file_match(study, f, index):
         keys={tokens[i:j] for i in range(len(tokens)) for j in range(i+1,min(len(tokens),i+10)+1)}
         prefix,_=task_name(f.path.stem)
         examples={tokens,identity(prefix)}
-    return match(index, keys, examples, study.min_confidence)
+    return match(index, keys, examples, study.min_confidence, set(YEAR.findall(f.path.stem)))

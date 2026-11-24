@@ -33,6 +33,7 @@ class SearchTests(unittest.TestCase):
         result = file_search.search("jeju[2026]", [str(self.downloads), str(self.extra), str(nested)])
         self.assertEqual(result["results"], [{"name": target.name, "path": str(target), "isFolder":False}])
         self.assertEqual(result["backend"], "폴더 검색")
+        self.assertEqual(result["total"], 1)
         self.assertFalse(result["truncated"])
 
     def test_search_reads_current_disk_state(self):
@@ -59,7 +60,40 @@ class SearchTests(unittest.TestCase):
             result = file_search.search("receipt", [str(self.root / "missing"), str(self.extra)])
         self.assertEqual(len(result["results"]), 2)
         self.assertTrue(result["truncated"])
+        self.assertIsNone(result["total"])
         self.assertTrue(all(Path(row["path"]).is_file() for row in result["results"]))
+
+    def test_incomplete_empty_search_does_not_claim_zero_total(self):
+        with patch.object(file_search,"ENTRY_LIMIT",0):
+            (self.extra/"unrelated.txt").touch()
+            limited=file_search.folder_search("missing",[str(self.extra)],lambda:None)
+        skipped=file_search.folder_search("missing",[str(self.root/"unavailable")],lambda:None)
+        for result in (limited,skipped):
+            self.assertEqual(result["results"],[])
+            self.assertIsNone(result["total"])
+        complete=file_search.folder_search("missing",[str(self.extra)],lambda:None)
+        self.assertEqual(complete["total"],0)
+
+    def test_sdk_keeps_index_total_and_deduplicates_only_identical_paths(self):
+        paths=[str(self.extra/"same.txt"),str(self.extra/"same.txt"),str(self.downloads/"same.txt")]
+        def full_path(results,index,buffer,size):
+            buffer.value=paths[index]
+            return len(buffer.value)
+        with patch.object(file_search.ctypes,"WinDLL",create=True) as load:
+            sdk=load.return_value
+            sdk.Everything3_GetSearchViewportCount.return_value=file_search.LIMIT+1
+            sdk.Everything3_GetResultListViewportCount.return_value=len(paths)
+            sdk.Everything3_GetResultListCount.return_value=len(paths)
+            sdk.Everything3_GetResultFullPathNameW.side_effect=full_path
+            sdk.Everything3_IsFolderResult.return_value=0
+            result=file_search.sdk_search("same")
+            self.assertFalse(result["truncated"])
+            self.assertEqual(result["total"],3)
+            self.assertEqual([row["path"] for row in result["results"]],[paths[0],paths[2]])
+            sdk.Everything3_GetResultListCount.return_value=410
+            capped=file_search.sdk_search("same")
+            self.assertTrue(capped["truncated"])
+            self.assertEqual(capped["total"],410)
 
     def test_cancellation_propagates(self):
         def cancelled():
@@ -97,6 +131,8 @@ def verify_live_sdk():
                 assert response["ok"],response
                 result=response["value"]
                 assert result["backend"]=="Everything 1.5 SDK",result
+                assert result["total"]>=len(result["results"])
+                assert len({r["path"] for r in result["results"]})==len(result["results"])
                 assert any(Path(r["path"]).is_file() and r["name"].casefold()=="everything.exe"
                            for r in result["results"]),result
                 print(json.dumps(dict(scenario="live SDK through open-stdin desktop IPC",

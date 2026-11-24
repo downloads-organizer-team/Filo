@@ -80,6 +80,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual({g.title:{f.name for f in g.members} for g in self.app.study.groups},
                          {"ACE":set(single),"BOB 15기 · WHS 4기":set(joint)})
 
+    def test_version_week_and_camera_numbers_do_not_name_an_activity(self):
+        for marker in ("REV2","week2","IMG12"):
+            with self.subTest(marker=marker):
+                self.create(f"[{marker}] 학술대회 예산.xlsx",f"[{marker}] 자동차 수리 내역.pdf")
+                self.scan()
+                self.assertFalse(any(self.app.study.activities))
+                self.assertFalse(self.app.study.groups)
+                for f in self.app.study.files:f.path.unlink()
+
     def test_short_random_names_and_creation_time_without_a_source_do_not_group(self):
         short=["ab2c435f.pdf","ab2c435e.pdf"]
         long=["51aa2385ca91bcdef0ab.pdf","58aa2385ca91bcdbe0ae.pdf"]
@@ -119,6 +128,26 @@ class WorkflowTests(unittest.TestCase):
         self.app.execute(new)
         self.assertTrue((self.root/"달빛정원_견적.xlsx").is_file())
         self.assertEqual(len(list((self.root/"달빛정원 (2)").iterdir())),1)
+
+    def test_existing_project_folder_year_must_match(self):
+        self.create("2025 여름 프로젝트/작년 문서.txt","2026 여름 프로젝트 1주차 보고서.pdf")
+        self.assertFalse(self.scan("reuse")["groups"])
+        self.create("2026 여름 프로젝트 2주차 보고서.docx")
+        self.scan("reuse")
+        self.assertEqual(len(self.app.study.groups),1)
+        self.assertIsNone(self.app.study.groups[0].destination)
+        self.create("2026 여름 프로젝트/올해 문서.txt")
+        self.scan("reuse")
+        rows=self.app.preview(dict(kind="organize"))["rows"]
+        self.assertEqual(len(rows),2)
+        self.assertEqual({Path(r["target"]).parent.name for r in rows},{"2026 여름 프로젝트"})
+
+    def test_sample_from_another_year_is_insufficient(self):
+        self.create("보관함/달빛정원_2025 견적.pdf","달빛정원_2026 시안.pdf")
+        self.assertFalse(self.scan("reuse")["groups"])
+        self.create("보관함/달빛정원_2026 기획.txt")
+        self.scan("reuse")
+        self.assertEqual(self.app.study.groups[0].destination,self.root/"보관함")
 
     def test_ambiguous_existing_destinations_abstain(self):
         self.create("보관 A/달빛정원_이전 견적.pdf","보관 B/달빛정원_이전 자료.pdf","달빛정원_추가 견적.pdf")

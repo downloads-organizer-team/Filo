@@ -26,6 +26,7 @@ class SearchFile(TypedDict):
 class SearchResult(TypedDict):
     backend: str
     results: list[SearchFile]
+    total: int | None
     elapsed: int
     truncated: bool
     note: str
@@ -86,16 +87,24 @@ def sdk_search(query: str) -> SearchResult:
         if not results:
             raise OSError("Everything 검색 결과를 가져올 수 없습니다.")
         rows: list[SearchFile] = []
+        seen_paths: set[str] = set()
         buffer = ctypes.create_unicode_buffer(32768)
-        for index in range(min(LIMIT, sdk.Everything3_GetResultListViewportCount(results))):
+        viewport = sdk.Everything3_GetResultListViewportCount(results)
+        for index in range(viewport):
             length = sdk.Everything3_GetResultFullPathNameW(results, index, buffer, len(buffer))
             if not 0 < length < len(buffer):
                 raise OSError("Everything 결과 경로를 읽을 수 없습니다.")
             p = Path(buffer.value)
-            rows.append(SearchFile(name=p.name or str(p), path=str(p),
+            full_path = str(p)
+            if full_path in seen_paths:
+                continue
+            seen_paths.add(full_path)
+            rows.append(SearchFile(name=p.name or full_path, path=full_path,
                                    isFolder=bool(sdk.Everything3_IsFolderResult(results, index))))
-        return SearchResult(backend="Everything 1.5 SDK", results=rows, elapsed=0,
-                    truncated=sdk.Everything3_GetResultListCount(results) > LIMIT,
+        total = sdk.Everything3_GetResultListCount(results)
+        # The SDK total counts index entries, including overlapping index sources.
+        return SearchResult(backend="Everything 1.5 SDK", results=rows[:LIMIT], total=total, elapsed=0,
+                    truncated=total > viewport or len(rows) > LIMIT,
                     note="Everything이 색인한 전체 위치에서 찾았습니다. 정리하려면 해당 폴더를 분석 위치에 추가하세요.")
     finally:
         if results:
@@ -124,6 +133,9 @@ def folder_search(query: str, roots: Sequence[str], stop: Callable[[], None]) ->
     needle = query.casefold()
     while pending:
         stop()
+        if perf_counter() - start > WALK_SECONDS:
+            truncated = True
+            break
         folder = pending.popleft()
         key = os.path.normcase(str(folder))
         if key in visited:
@@ -161,12 +173,14 @@ def folder_search(query: str, roots: Sequence[str], stop: Callable[[], None]) ->
             skipped += 1
         if truncated:
             break
-    note = "Everything 연결 없이 폴더를 직접 검색했습니다. 검색 시작 위치: " + ", ".join(roots)
+    note = ("Everything 연결 없이 폴더를 직접 검색했습니다. 검색 시작 위치: " + ", ".join(roots)
+            if roots else "검색을 시작할 로컬 드라이브를 찾을 수 없습니다.")
     if skipped:
         note += f" 읽을 수 없는 위치 {skipped}개를 건너뛰었습니다."
     if truncated:
         note += " 검색 범위 또는 결과 한도에 도달했습니다. 더 구체적인 이름으로 검색하세요."
     return SearchResult(backend="폴더 검색", results=sorted(rows[:LIMIT], key=lambda r: r["path"].casefold()),
+                total=None if truncated or skipped or not roots else len(rows),
                 elapsed=round((perf_counter() - start) * 1000), truncated=truncated, note=note)
 
 

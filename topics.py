@@ -13,6 +13,7 @@ TEAM = re.compile(r"(?:팀[ _]+프로젝트|팀명)\s*[:_ -]+\s*([가-힣]{2,12}
 PROJECT = re.compile(r"(?<![가-힣a-z])([가-힣a-z]{2,20})[ _-]+프로젝트", re.I)
 WORD = re.compile(r"[^\W_]+")
 NOISE = TASK_GENERIC | {"붙임","첨부","양식","신청서","참가신청서","작성자","무제","최종본","사본","팀","팀명"}
+NON_PROGRAM_CODES = NOISE | TERMS | {"unit","ver","version","rev","cve","iso","pdf","docx","pptx","zip","jpg","png"}
 UUID = re.compile(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", re.I)
 
 
@@ -67,6 +68,7 @@ def activities(files):
     teams = set()
     events = set()
     cohorts = defaultdict(set)
+    marked = set()
     for stem in stems:
         for m in TEAM.finditer(stem):
             team=next(v for v in m.groups() if v)
@@ -74,17 +76,17 @@ def activities(files):
             if team and team not in NOISE:teams.add(team)
         if title := event_title(stem):
             events.add(title)
-        for code, number in COHORT.findall(stem):
-            if code.lower() not in NOISE and not re.fullmatch(r"img|dsc|scan|unit|ver|rev|cve|iso", code, re.I):
-                cohorts[code.upper()].add(number)
-    # Only a marked cohort (brackets, 기, etc.) establishes an acronym as a program.
-    marked = {m[1].upper() for stem in stems for m in COHORT.finditer(stem)
-              if "기" in m[0] or stem[m.end():].startswith("]")}
+        for m in COHORT.finditer(stem):
+            if m[1].casefold() in NON_PROGRAM_CODES:
+                continue
+            code=m[1].upper()
+            cohorts[code].add(m[2])
+            if "기" in m[0] or stem[m.end():].startswith("]"):
+                marked.add(code)
     tags=set()
-    excluded=NOISE|TERMS|{"pdf","docx","pptx","zip","jpg","png"}
     for stem in stems:
         for tag in re.findall(r"\[([A-Z]{2,8})\]",stem):
-            if tag.casefold() not in excluded:
+            if tag.casefold() not in NON_PROGRAM_CODES:
                 tags.add(tag)
     # A bracketed program tag can also recur without a cohort number.
     marked.update(tag for tag in tags if sum(bool(re.search(r"(?<![a-z])"+tag+r"(?![a-z])",s,re.I))

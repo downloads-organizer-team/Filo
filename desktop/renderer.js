@@ -125,12 +125,16 @@ function liveSearch(){
     try{
       const result=await call("search",{query});
       if(version!==liveVersion)return;
-      $("#search-meta").textContent=result.backend+" · "+result.results.length+"개"+(result.truncated?" · 일부 결과":"")+" · "+result.note;
+      const shown=result.results.length.toLocaleString("ko-KR");
+      const count=result.total==null?"확인한 범위에서 "+shown+"개 표시":
+        result.total!==result.results.length?"색인 일치 "+result.total.toLocaleString("ko-KR")+"건 · "+shown+"개 경로 표시":"전체 "+shown+"개";
+      $("#search-meta").textContent=result.backend+" · "+count+" · "+result.note;
       $("#search-rows").innerHTML=result.results.map(r=>{
         const glyph=r.icon?'<img class="shell-icon" src="'+esc(r.icon)+'" alt="">':icon(r.isFolder?"folder-open":"file-text");
         return '<tr><td><span class="search-name" title="'+esc(r.name)+'">'+glyph+'<span>'+esc(r.name)+'</span></span></td><td title="'+esc(r.path)+'">'+esc(r.path)+'</td></tr>';
       }).join("");
-      $("#search-empty").hidden=!!result.results.length;$("#search-empty").textContent="일치하는 파일이나 폴더가 없습니다.";
+      $("#search-empty").hidden=!!result.results.length;
+      $("#search-empty").textContent=result.total==null?"확인한 범위에서 일치하는 이름을 찾지 못했습니다.":"일치하는 파일이나 폴더가 없습니다.";
     }catch(e){if(version===liveVersion)$("#search-empty").textContent=e.message;}
   },120);
 }
