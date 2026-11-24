@@ -51,7 +51,7 @@ class SourceTests(unittest.TestCase):
         return self.app.run(action,dict(generation=self.data["generation"],**args))
 
     def grouped(self):
-        self.scan([str(self.extra)])
+        self.scan([str(self.root),str(self.extra)])
         group=Group("test","Collected",self.app.study.files)
         self.app.study.groups=[group]
         for file in group.members:file.group=group
@@ -62,17 +62,18 @@ class SourceTests(unittest.TestCase):
         (nested/"alpha.txt").write_text("alpha")
         (self.extra/"beta.txt").write_text("beta")
         options=self.app.run("sources",dict(roots=[str(nested),str(self.extra),str(self.extra)]))
-        self.assertEqual(options["roots"],list(map(str,[self.root,nested,self.extra])))
+        self.assertEqual(options["roots"],list(map(str,[nested,self.extra])))
         self.assertEqual(Desktop().options(),options)
         data=self.scan()
         self.assertEqual(data["roots"],options["roots"])
-        self.assertEqual(data["root"],str(self.root))
+        self.assertEqual(data["root"],str(nested))
         self.assertEqual({f["path"] for f in data["files"]},{str(nested/"alpha.txt"),str(self.extra/"beta.txt")})
         self.assertEqual(len(data["files"]),2)
         self.assertEqual({f.rel for f in self.app.study.files},{str(nested),str(self.extra)})
         self.assertEqual(len({f.uid for f in self.app.study.files}),2)
         reset=self.app.run("sources",dict(roots=[]))
-        self.assertEqual(reset["roots"],[str(self.root)])
+        self.assertEqual(reset["roots"],[])
+        with self.assertRaises(ValueError):self.scan()
 
     def test_nonrecursive_overlapping_root_still_scans_explicit_child(self):
         nested=self.root/"Nested";nested.mkdir()
@@ -180,12 +181,12 @@ class SourceTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.call("preview",kind="organize",destination=str(link))
 
-    def test_search_without_scan_uses_current_roots(self):
+    def test_search_without_scan_is_independent_of_organization_roots(self):
         target=self.extra/"alpha.txt";target.write_text("project")
-        self.app.run("sources",dict(roots=[str(self.extra)]))
-        with patch.dict(os.environ,MOA_EVERYTHING_DLL=str(self.extra/"absent.dll")):
+        self.app.run("sources",dict(roots=[str(self.root)]))
+        with patch.dict(os.environ,MOA_EVERYTHING_DLL=str(self.extra/"absent.dll")), patch("file_search.drive_roots",return_value=[str(self.extra)]):
             result=self.app.run("search",dict(query="alpha"))
-        self.assertEqual(result["results"],[dict(name="alpha.txt",path=str(target))])
+        self.assertEqual(result["results"],[dict(name="alpha.txt",path=str(target),isFolder=False)])
 
     def test_related_view_is_bounded_and_excludes_unrelated_files(self):
         for number in range(1,9):(self.extra/f"별빛_시안_v{number}.txt").touch()

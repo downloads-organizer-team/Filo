@@ -6,6 +6,8 @@ from urllib.parse import urlsplit
 from features import LEXICON, ALIASES, TASK_GENERIC, TASK_SEPARATOR, VERSION, clean, tokenize, task_name, task_prefixes
 from models import Vector
 import course_source
+from topics import activities, activity_relation, opaque_format
+import re
 
 NEIGHBORS={}
 for context,words in LEXICON.items():
@@ -54,6 +56,9 @@ def same_source_page(a,b):
     return bool(x and x==y)
 
 def task_conflict(s,i,j):
+    relation=activity_relation(s.activities[i],s.activities[j])
+    if relation:
+        return relation < 0
     x,y=s.task_prefixes[i],s.task_prefixes[j]
     a,b=s.files[i],s.files[j]
     return bool(x and y and (x!=y or (a.year and b.year and a.year!=b.year)))
@@ -81,16 +86,37 @@ def compare(s,i,j,details=False):
     if different_edition and not different_term:base*=.55
     score=base+(1-base)*context
     scope=course_source.relation(a,b)
-    if scope==1:score=score+(1-score)*.76
+    activity=activity_relation(s.activities[i],s.activities[j])
+    if activity==1:
+        score=max(score,.96)
+    batch=False
+    if s.opaque_formats[i] or s.opaque_formats[j]:
+        close_downloads=all(t is not None for t in downloaded) and abs(downloaded[0]-downloaded[1])<=300
+        same_origin_creation=(downloaded==(None,None) and host and a.created and b.created
+                              and abs(a.created-b.created)<=120)
+        batch=bool(s.opaque_formats[i] and s.opaque_formats[i][1]>=16 and s.opaque_formats[i]==s.opaque_formats[j]
+                   and a.ext==b.ext and a.path.parent==b.path.parent and (close_downloads or same_origin_creation))
+        score=.82 if batch else 0.
+    if scope==1:
+        inferred=a.course_scope and a.course_scope[0][-1]=="attachment"
+        score=score+(1-score)*(.26 if inferred else .76)
     elif scope==-1:score=min(score,.45)
-    if task_conflict(s,i,j) and scope!=1:score=min(score,.45)
+    if activity<0 or (task_conflict(s,i,j) and scope!=1):score=min(score,.45)
     if different_term:score*=.55
-    if details:return dict(literal=lex,semantic=sem,string=char,context=context,sequence=seq,folder=same_dir,time=timing,source=host,source_page=source_page,version=version,course=scope,task=task)
+    if details:return dict(literal=lex,semantic=sem,string=char,context=context,sequence=seq,folder=same_dir,time=timing,source=host,source_page=source_page,version=version,course=scope,task=task,activity=activity==1,batch=batch)
     return round(100*score)
 
 def prepare(study):
     course_source.prepare(study.files)
+    study.activities=activities(study.files)
+    study.opaque_formats=[opaque_format(f.path.stem) for f in study.files]
+    authors=set()
+    for f in study.files:
+        authors.update(re.findall(r"(?:작성자|제출자|담당자|\d+반)[ _:.-]*([가-힣]{2,4})(?![가-힣])", f.path.stem))
+        authors.update(re.findall(r"(?:^|[_ (.-])([가-힣]{2,4})\s*\(\d{4,10}\)",f.path.stem))
+        authors.update(re.findall(r"(?:^|[_ -])\d{6,10}[_ -]+([가-힣]{2,4})$",f.path.stem))
     study.task_prefixes=task_prefixes(study.files)
+    study.task_prefixes=["" if p in authors else p for p in study.task_prefixes]
     study.task_heads=[TASK_SEPARATOR.split(VERSION.sub("",clean(f.path.stem)),maxsplit=1)[0].strip() for f in study.files]
     study.parents=[os.path.normcase(os.path.abspath(f.path.parent)) if clean(f.path.parent.name) not in
                    TASK_GENERIC|{"공용","inbox"} else "" for f in study.files]
@@ -105,7 +131,8 @@ def prepare(study):
             study.download_times.append(None)
     df=Counter(w for f in study.files for w in set(f.tokens))
     study.idf={w:1+log((len(study.files)+1)/(n+1)) for w,n in df.items()}
-    study.vectors=[vector(f.tokens,study.idf) for f in study.files]
+    study.vectors=[vector(() if fmt else (w for w in f.tokens if w not in authors), study.idf)
+                   for f,fmt in zip(study.files,study.opaque_formats)]
     known={p for p in study.task_prefixes if p}
     for i,f in enumerate(study.files):
         parent,_=task_name(f.path.parent.name+"_file")
@@ -119,13 +146,16 @@ def content_vector(study,text):
 def refined(study,i,j):
     base=study.primary[i][j]/100
     scope=course_source.relation(study.files[i],study.files[j])
-    if scope==-1 or (task_conflict(study,i,j) and scope!=1):
+    if (scope==-1 or activity_relation(study.activities[i],study.activities[j])<0
+            or study.opaque_formats[i] or study.opaque_formats[j] or (task_conflict(study,i,j) and scope!=1)):
         return study.primary[i][j]
     values=[]
     for changed,other in ((i,j),(j,i)):
-        if changed in study.extras:
+        # A descriptive filename needs its own link to this topic. A word in
+        # a long excerpt is enough to complement a blank title, not replace one.
+        if changed in study.extras and (not study.vectors[changed].literal or base>=.50):
             values.append(fuse(*channels(study.extras[changed],study.vectors[other])))
-    if i in study.extras and j in study.extras:
+    if i in study.extras and j in study.extras and base>=.50:
         values.append(fuse(*channels(study.extras[i],study.extras[j])))
     evidence=max(values,default=0)
     return round(100*(base+(1-base)*.91*evidence))

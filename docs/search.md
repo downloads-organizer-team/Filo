@@ -6,7 +6,7 @@
 
 Windows x64 앱에 공식 Everything SDK 3.0.1.12의 `Everything3_x64.dll`을 포함했습니다. Everything 1.5가 실행 중이면 기본 인스턴스, 이어서 `1.5a`에 연결합니다. 다른 이름으로 실행한 인스턴스는 `MOA_EVERYTHING_INSTANCE` 환경 변수로 지정할 수 있습니다. `MOA_EVERYTHING_DLL`은 명시적인 SDK 경로를 지정할 때 사용합니다.
 
-네이티브 SDK는 별도 Python 프로세스에서 호출하고 5초 제한을 둡니다. 설치되지 않은 SDK, 실행되지 않은 Everything, 응답하지 않는 IPC 때문에 정리 앱 전체가 멈추지 않도록 하기 위한 경계입니다. 실패하면 사용자가 선택한 폴더를 탐색하고 화면에 범위를 명시합니다.
+네이티브 SDK는 별도 Python 프로세스에서 호출하고 5초 제한을 둡니다. 설치되지 않은 SDK, 실행되지 않은 Everything, 응답하지 않는 IPC 때문에 정리 앱 전체가 멈추지 않도록 하기 위한 경계입니다. 연결에 실패하면 고정식·이동식 드라이브의 루트에서 탐색을 시작하고 화면에 실제 범위를 표시합니다.
 
 SDK 프로세스의 표준 입력은 `DEVNULL`로 분리합니다. Electron의 요청을 받는 Python 서비스 입력 파이프를 상속하면 실제 서비스에서 응답이 지연되는 것을 재현했습니다. 같은 입력 파이프를 열린 상태로 유지하는 검증에서, 분리 후 SDK 검색이 122ms에 완료됐습니다.
 
@@ -32,18 +32,18 @@ SDK 프로세스의 표준 입력은 `DEVNULL`로 분리합니다. Electron의 �
 
 기존 브라우저 확장은 웹페이지 제목과 주소를 추가하는 선택 기능입니다. 확장 설치 대비 정확도 개선을 일반화할 실사용 데이터는 아직 없으므로 필수로 만들지 않습니다. Chrome·Edge는 기존 연결 경로를 사용하며 웨일의 Native Messaging은 검증되지 않았습니다.
 
-## 자체 탐색과 REA 검토
+## 자체 탐색과 검색 화면
 
-Everything을 사용할 수 없을 때는 별도 서비스나 관리자 권한 없이 선택된 폴더를 직접 탐색합니다. 현재는 영구 자체 색인을 만들지 않습니다. 파일 삭제·이동·클라우드 상태 변화를 추적하는 별도 색인을 유지하기보다 실제 파일시스템의 상태를 확인하는 단순한 대안입니다. 이 경로는 Everything과 같은 전역 검색 속도를 보장하지 않습니다.
+Everything을 사용할 수 없을 때는 로컬 드라이브의 루트에서 너비 우선으로 탐색합니다. 현재는 영구 자체 색인을 만들지 않습니다. 파일 삭제·이동·클라우드 상태 변화를 추적하는 별도 색인을 유지하기보다 실제 파일시스템의 상태를 확인하는 단순한 대안입니다. 이 경로는 Everything과 같은 전역 검색 속도를 보장하지 않습니다.
 
 폴더 검색은 하위 폴더를 포함하고 연결 경로를 따라가지 않습니다. 탐색 항목 50,000개, 3초, 결과 200개 중 한도에 도달하면 잘린 결과임을 알립니다. 그룹 분석은 전체 선택 경로 합계 3,000개 한도이며, 검색 결과 수와 별개입니다.
 
-이 작업 환경의 도구 목록에서 REA MCP를 두 차례 검색했지만 사용할 수 있는 도구가 없었습니다. REA로 Everything을 분석했다거나 내부 알고리즘을 복제했다고 주장하지 않습니다. 공식 SDK로 필요한 검색이 가능하므로 제품은 지원되는 API를 사용합니다. 공개 SDK의 C 구현을 읽어 위 API 동작을 확인한 것과 Everything 검색 엔진 자체의 역분석을 구분합니다.
+검색 입력을 바꾸면 이전 질의를 취소하고 최신 결과만 표시합니다. 파일·폴더 구분은 SDK의 `Everything3_IsFolderResult`를 사용하며, 검색 목록의 아이콘은 Electron이 Windows 셸에서 가져옵니다.
 
 ## 재현 가능한 검증
 
 ```powershell
-python -B -X utf8 -m unittest -v test_pipeline test_desktop test_sources test_relationships test_search
+python -B -X utf8 -m unittest discover -v
 python -B -X utf8 file_search.py Everything.exe
 python -B -X utf8 test_search.py --sdk
 python -B test_relationships.py --benchmark
@@ -53,7 +53,9 @@ python -B test_relationships.py --benchmark
 
 측정은 파일 수, 파일명 구성, 본문 분석 여부, 실행 환경과 결과 묶음을 함께 기록합니다. 합성 자료의 실행 시간을 모든 실제 폴더의 성능으로 일반화하지 않습니다.
 
-### 측정 결과
+Windows에서 실제 화면을 확인하려면 Python Playwright가 설치된 환경에서 `python desktop_smoke.py "Electron 실행 파일 경로"`를 실행합니다. 임시 프로필에서 입력 검색, Windows 아이콘, 복수 경로 표시, 11단계 기준, 이동·복원을 검증합니다.
+
+### 이전 브랜치의 측정 결과
 
 Windows 11 x64, Core Ultra 7 258V에서 얻은 단일 실행 값입니다. 합성 입력은 서로 구별되는 두 파일짜리 프로젝트들이며, 모든 쌍을 비교합니다. 후보를 생략해 속도를 얻는 방식은 사용하지 않았습니다.
 

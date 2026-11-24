@@ -12,7 +12,8 @@ ROLES = set("과제 실습 강의 보고서 기말 중간 제출물 프로젝트
 GENERIC = set("개론 개요 기초 입문 분석 문서 수업 계획서 소개 강의소개 강의계획서 과목소개 공통 제목없음 scan img dsc untitled document screenshot data 파일 appendix appendix1 chap chapter ch week wk lec practice introduction syllabus orientation".split()) | ROLES
 COMMON_PREFIXES={"다운로드","download","downloads","screenshot","스크린샷","image","이미지","제목 없음","attachment"}
 TASK_GENERIC=COMMON_PREFIXES|GENERIC|{"여행","travel","trip","vacation","holiday","업무","작업","받은 파일",
-    "항공권","숙소","예약","숙소예약","일정","일정표","itinerary","booking","reservation","ticket","hotel"}
+    "항공권","숙소","예약","숙소예약","일정","일정표","itinerary","booking","reservation","ticket","hotel",
+    "무제","제목없음","제목","없음","붙임","별첨","양식","제출","작성자","사본","강의자료","작성","제출자"}
 ALIASES = {"춘계축제":"봄축제","봄축전":"봄축제","dataanalytics":"데이터분석","springfestival":"봄축제","와이어샤크":"wireshark","packet":"패킷","network":"네트워크","networking":"네트워크","nutrition":"영양학","protein":"단백질","carbohydrate":"탄수화물"}
 VERSION = re.compile(r"\(\s*\d+\s*\)|진짜\s*최종(?:본)?\d*|최종(?:본)?\d*|수정(?:본)?\d*|(?<![a-z])(?:final|copy|version|ver|rev|v)\s*\d*(?![a-z])",re.I)
 TASK_SEPARATOR = re.compile(r"\s*_+\s*|\s+[-–—]\s+")
@@ -35,7 +36,7 @@ def tokenize(text):
         # Keep identifiers such as 프로젝트A and 과제01 intact.
         chunks = SPLIT.split(word) if re.fullmatch("[가-힣]+",word) else [word]
         for part in chunks:
-            if len(part)<2 or part.isdecimal() or re.fullmatch(r"(img|dsc|scan)\d+",part):continue
+            if len(part)<2 or part.isdecimal() or re.fullmatch(r"(img|dsc|scan|untitled|무제)\d+",part):continue
             result.append(ALIASES.get(part,part))
     return result
 

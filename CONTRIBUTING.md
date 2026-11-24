@@ -14,7 +14,7 @@
 
 전체 처리 순서와 신뢰도 기준은 [분석 설계](docs/analysis.md)에서 볼 수 있습니다.
 
-README의 소스 실행 명령으로 여는 화면은 `desktop/`에 있습니다. 루트의 `app.pyw`는 배포 실행 파일이 있으면 그 파일을 열고, 없으면 Tkinter 화면을 엽니다. Electron 화면의 버튼 문구는 [desktop/renderer.js](desktop/renderer.js), 기본 배치와 스타일은 [desktop/index.html](desktop/index.html)과 [desktop/style.css](desktop/style.css)에서 찾을 수 있습니다.
+README의 소스 실행 명령으로 여는 화면은 `desktop/`에 있습니다. 루트의 `app.pyw`는 `start.cmd`와 같은 Electron 화면을 엽니다. 이전 Tkinter 검토 화면은 `python app.pyw --legacy`로 실행할 수 있습니다. Electron 화면의 버튼 문구는 [desktop/renderer.js](desktop/renderer.js), 기본 배치와 스타일은 [desktop/index.html](desktop/index.html)과 [desktop/style.css](desktop/style.css)에서 찾을 수 있습니다.
 
 ## 이슈에서 작업 나누기
 

@@ -49,13 +49,29 @@ def scan_options():
     return False,True,True
 
 def source_roots():
-    default=downloads_folder().absolute()
     try:
         value=json.loads((HOME/"download-settings.json").read_text(encoding="utf-8"))
-        roots=value.get("roots",[]) if isinstance(value,dict) else []
-    except (OSError,ValueError):roots=[]
-    return list(dict.fromkeys([str(default)]+[str(Path(p)) for p in roots
-                              if isinstance(p,str) and Path(p).is_absolute()]))
+        roots=value.get("roots") if isinstance(value,dict) else None
+        if isinstance(roots,list):
+            return list(dict.fromkeys(str(Path(p)) for p in roots if isinstance(p,str) and Path(p).is_absolute()))
+    except (OSError,ValueError):pass
+    return [str(downloads_folder().absolute())]
+
+
+def organization_options():
+    try:
+        value=json.loads((HOME/"download-settings.json").read_text(encoding="utf-8"))
+        return validate_criteria(value.get("minConfidence",.7),value.get("folderMode","reuse"))
+    except (OSError,ValueError,AttributeError):
+        return .7,"reuse"
+
+
+def validate_criteria(minimum,mode):
+    if type(minimum) not in (int,float) or minimum not in [i/10 for i in range(11)]:
+        raise ValueError("최소 신뢰도는 0부터 1까지 0.1 단위로 선택하세요.")
+    if mode not in ("new","reuse"):
+        raise ValueError("기존 폴더 활용 방식을 선택하세요.")
+    return minimum,mode
 
 
 def validate_roots(roots):
@@ -63,18 +79,21 @@ def validate_roots(roots):
         raise ValueError("원본 폴더 목록을 확인하세요.")
     result=[]
     keys=set()
-    for value in [str(downloads_folder().absolute()),*roots]:
+    for value in roots:
         path=check_directory(Path(value))
         key=os.path.normcase(str(path))
         if key not in keys:result.append(str(path));keys.add(key)
     return result
 
 
-def remember_options(recursive,deep,course_covers=True,roots=None):
+def remember_options(recursive,deep,course_covers=True,roots=None,minimum=None,mode=None):
+    old_min,old_mode=organization_options()
     try:
         HOME.mkdir(parents=True,exist_ok=True)
         save(HOME/"download-settings.json",dict(recursive=recursive,deep=deep,course_covers=course_covers,
-                                               roots=source_roots() if roots is None else list(map(str,roots))))
+                                               roots=source_roots() if roots is None else list(map(str,roots)),
+                                               minConfidence=old_min if minimum is None else minimum,
+                                               folderMode=old_mode if mode is None else mode))
     except OSError:pass
 
 def sample():
@@ -123,6 +142,7 @@ class FolderMove:
     roots: tuple[Path,...] = ()
     destination: Path | None = None
     mode: str = "new"
+    destination_id: tuple[int,int] | None = None
 
 
 def folder_name(title):
@@ -150,7 +170,7 @@ def check_group_paths(root, source, target, roots=None, mode="new"):
 
 
 def plan_group_folders(study, selected=None, destination=None, mode="new"):
-    if mode not in ("new","existing"):raise ValueError("대상 폴더 방식을 확인하세요.")
+    if mode not in ("new","existing","reuse"):raise ValueError("대상 폴더 방식을 확인하세요.")
     if mode=="existing" and destination is None:raise ValueError("대상 폴더를 선택하세요.")
     destination=check_directory(Path(destination) if destination is not None else study.root)
     roots=tuple(study.roots or [study.root])
@@ -161,17 +181,24 @@ def plan_group_folders(study, selected=None, destination=None, mode="new"):
         base = folder_name(group.title)
         name = base
         suffix = 2
-        while name.casefold() in names:
+        while name.casefold() in names or (mode!="existing" and os.path.lexists(destination/name)):
             name = f"{base} ({suffix})"
             suffix += 1
         names.add(name.casefold())
         if selected is not None and group is not selected:
             continue
+        reuse=group.destination if mode=="reuse" else None
+        parent=reuse or destination
+        move_mode="existing" if reuse or mode=="existing" else "new"
+        folder_id=None
+        if move_mode=="existing":
+            info=check_directory(parent).stat()
+            folder_id=(info.st_dev,info.st_ino)
         for file in sorted(group.members, key=lambda f: str(f.path).casefold()):
-            target = destination / name / file.name if mode=="new" else destination / file.name
+            target = parent / name / file.name if move_mode=="new" else parent / file.name
             skip = ""
             try:
-                check_group_paths(destination, file.path, target, roots, mode)
+                check_group_paths(parent, file.path, target, roots, move_mode)
                 if target == file.path:
                     skip = "이미 정리됨"
                 elif os.path.lexists(target) or target in reserved:
@@ -180,7 +207,7 @@ def plan_group_folders(study, selected=None, destination=None, mode="new"):
                     reserved.add(target)
             except (OSError, RuntimeError) as error:
                 skip = str(error)
-            plan.append(FolderMove(file, target, skip, roots, destination, mode))
+            plan.append(FolderMove(file, target, skip, roots, parent, move_mode, folder_id))
     return plan
 
 
@@ -201,6 +228,9 @@ def move_files(plan, group_root=None):
             destination=item.destination or group_root
             roots=item.roots or ((Path(group_root),) if group_root is not None else ())
             if destination is not None:check_group_paths(destination,f.path,target,roots,item.mode)
+            if item.destination_id:
+                info=destination.stat()
+                if item.destination_id!=(info.st_dev,info.st_ino):raise OSError("미리보기 후 대상 폴더가 바뀌었습니다.")
             st=f.path.lstat()
             if (stat.S_ISLNK(st.st_mode) or getattr(st,"st_file_attributes",0)&stat.FILE_ATTRIBUTE_REPARSE_POINT
                     or file_uid(f.path,st)!=f.uid):raise OSError("분석 후 파일 변경")
@@ -210,11 +240,13 @@ def move_files(plan, group_root=None):
                      uid=f.uid,size=f.size,mtime_ns=f.mtime_ns)
             if destination is not None:
                 row.update(group_root=str(destination),source_roots=list(map(str,roots)),destination_mode=item.mode)
+                if item.destination_id:row["destination_id"]=list(item.destination_id)
             rows.append(row)
             reserved.add(target)
         except (OSError,RuntimeError) as ex:report.append("건너뜀   "+f.name+"   ·   "+str(ex))
     if not rows:return report
     save(log,rows)
+    created={}
     for r in rows:
         src=Path(r["src"]);dst=Path(r["dst"])
         try:
@@ -222,14 +254,16 @@ def move_files(plan, group_root=None):
                 destination=Path(r["group_root"])
                 check_group_paths(destination,src,dst,r.get("source_roots"),r.get("destination_mode","new"))
                 if r.get("destination_mode","new")=="new":
-                    try:
+                    if dst.parent not in created:
                         dst.parent.mkdir()
-                    except FileExistsError:
-                        pass
-                    else:
                         info=dst.parent.stat()
                         r["created_dir"]=[info.st_dev,info.st_ino]
+                        created[dst.parent]=r["created_dir"]
                         save(log,rows)
+                expected=created.get(dst.parent) or r.get("destination_id")
+                if expected:
+                    info=dst.parent.stat()
+                    if expected!=[info.st_dev,info.st_ino]:raise OSError("대상 폴더가 바뀌었습니다.")
                 check_group_paths(destination,src,dst,r.get("source_roots"),r.get("destination_mode","new"))
             st=src.lstat()
             if ((st.st_size,st.st_mtime_ns)!=(r["size"],r["mtime_ns"])

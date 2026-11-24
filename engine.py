@@ -13,9 +13,10 @@ from refinement import refine,summarize
 from constraints import Constraints
 import feedback
 
-def analyze(root,recursive=True,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,roots=None):
+def analyze(root,recursive=True,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,roots=None,min_confidence=.7):
     start=perf_counter()
     s=Study(Path(root).absolute(),deep)
+    s.min_confidence=min_confidence
     s.roots=[Path(p).absolute() for p in roots] if roots is not None else [s.root]
     status("파일 스캔 중");scan(s,recursive,stop)
     status("파일명과 메타데이터 분석 중");extract(s.files,stop)
@@ -33,6 +34,9 @@ def analyze(root,recursive=True,deep=True,stop=lambda:None,status=lambda text:No
     for group in s.groups:
         stop()
         assign_title(s,group,saved,read_covers)
+        if group.title_kind in {"activity","batch"}:
+            for file in group.members:
+                if file.state=="1차 추천":file.note=group.title_note
     s.groups.sort(key=lambda g:(g.title,g.gid))
     s.ms=round((perf_counter()-start)*1000)
     return s

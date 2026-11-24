@@ -1,10 +1,10 @@
 """Windows 데스크톱 파일 묶음 검토 앱."""
 if __name__ == "__main__":
     from pathlib import Path
-    from subprocess import Popen
-    desktop = Path(__file__).resolve().parent / "runtime" / "organizer.exe"
-    if desktop.is_file():
-        Popen([str(desktop)], cwd=desktop.parent.parent)
+    import os
+    import sys
+    if "--legacy" not in sys.argv:
+        os.startfile(Path(__file__).resolve().with_name("start.cmd"))
         raise SystemExit
 
 import sqlite3
@@ -47,8 +47,7 @@ class App:
         self.busy = self.closed = False
         self.view, self.scope, self.kind = "files", "all", ""
         self.checked = set()
-        recursive,deep,course_covers = storage.scan_options()
-        self.sub = tk.BooleanVar(value=recursive)
+        _,deep,course_covers = storage.scan_options()
         self.deep = tk.BooleanVar(value=deep)
         self.course_covers = tk.BooleanVar(value=course_covers)
         self.rowpg, self.colpg = tk.StringVar(value="1"), tk.StringVar(value="1")
@@ -119,7 +118,7 @@ class App:
         tools.grid(row=4,column=0,sticky="sew",padx=17,pady=(8,12))
         tk.Frame(tools,bg=RAIL_LINE,height=1).pack(fill="x",pady=(0,11))
         label(tools,"분석 설정",9,True,"#BDB5CE",NAVY).pack(anchor="w",padx=4,pady=(0,4))
-        for title,var in (("하위 폴더 포함",self.sub),("애매한 파일만 본문 분석",self.deep),
+        for title,var in (("애매한 파일만 본문 분석",self.deep),
                           ("강의 표지로 과목명 찾기",self.course_covers)):
             check = tk.Checkbutton(tools,text=title,variable=var,command=self.changed,
                                    font=font(10),bg=NAVY,fg=WHITE,activebackground=NAVY,
@@ -370,7 +369,7 @@ class App:
         self.timer=self.w.after(80,self.poll)
     def analyze(self):
         if self.busy:return
-        sub,deep,course_covers=self.sub.get(),self.deep.get(),self.course_covers.get()
+        sub,deep,course_covers=False,self.deep.get(),self.course_covers.get()
         try:
             path=storage.downloads_folder()
         except OSError as error:
@@ -404,7 +403,7 @@ class App:
         self.matrix_scope.set("")
     def bind_result(self,result):
         self.current=result;self.path=result.root;self.checked.clear();self.last_pair=None
-        storage.remember_options(self.sub.get(),result.deep,self.course_covers.get())
+        storage.remember_options(False,result.deep,self.course_covers.get())
         self.update_path()
         pages=[str(x) for x in range(1,max(1,(len(result.files)+11)//12)+1)]
         for box in self.pagers:box.configure(values=pages)

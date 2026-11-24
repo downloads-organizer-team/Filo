@@ -1,5 +1,6 @@
 """Literal filename search through the official SDK, or selected folders."""
 from collections.abc import Callable, Sequence
+from collections import deque
 import ctypes
 import json
 import os
@@ -19,6 +20,7 @@ WALK_SECONDS = 3
 class SearchFile(TypedDict):
     name: str
     path: str
+    isFolder: bool
 
 
 class SearchResult(TypedDict):
@@ -51,6 +53,7 @@ def sdk_search(query: str) -> SearchResult:
         "GetResultListViewportCount": ([pointer], size),
         "GetResultListCount": ([pointer], size),
         "GetResultFullPathNameW": ([pointer, size, ctypes.c_wchar_p, size], size),
+        "IsFolderResult": ([pointer, size], boolean),
         "DestroyClient": ([pointer], boolean),
         "DestroySearchState": ([pointer], boolean),
         "DestroyResultList": ([pointer], boolean),
@@ -72,7 +75,7 @@ def sdk_search(query: str) -> SearchResult:
         if not state:
             raise OSError("Everything 검색 상태를 만들 수 없습니다.")
         # Regex escapes make the user's filename a literal, not Everything syntax.
-        expression = 'file: regex:"' + re.escape(query) + '"'
+        expression = 'regex:"' + re.escape(query) + '"'
         # SDK 3.0.1.12 sets the count but always returns FALSE; read its value.
         sdk.Everything3_SetSearchViewportCount(state, LIMIT + 1)
         if not (sdk.Everything3_SetSearchTextW(state, expression)
@@ -89,7 +92,8 @@ def sdk_search(query: str) -> SearchResult:
             if not 0 < length < len(buffer):
                 raise OSError("Everything 결과 경로를 읽을 수 없습니다.")
             p = Path(buffer.value)
-            rows.append(SearchFile(name=p.name, path=str(p)))
+            rows.append(SearchFile(name=p.name or str(p), path=str(p),
+                                   isFolder=bool(sdk.Everything3_IsFolderResult(results, index))))
         return SearchResult(backend="Everything 1.5 SDK", results=rows, elapsed=0,
                     truncated=sdk.Everything3_GetResultListCount(results) > LIMIT,
                     note="Everything이 색인한 전체 위치에서 찾았습니다. 정리하려면 해당 폴더를 분석 위치에 추가하세요.")
@@ -101,17 +105,26 @@ def sdk_search(query: str) -> SearchResult:
         sdk.Everything3_DestroyClient(client)
 
 
+def drive_roots() -> list[str]:
+    if os.name != "nt":
+        return [os.path.abspath(os.sep)]
+    kernel = ctypes.windll.kernel32
+    mask = kernel.GetLogicalDrives()
+    roots = [f"{chr(65+i)}:\\" for i in range(26) if mask & (1 << i)]
+    return [root for root in roots if kernel.GetDriveTypeW(root) in (2, 3)]
+
+
 def folder_search(query: str, roots: Sequence[str], stop: Callable[[], None]) -> SearchResult:
     """Bound disk work; never follow junctions or silently imply a global index."""
     start = perf_counter()
-    pending = [Path(p).absolute() for p in reversed(roots)]
+    pending = deque(Path(p).absolute() for p in roots)
     visited: set[str] = set()
     rows: list[SearchFile] = []
     examined, skipped, truncated = 0, 0, False
     needle = query.casefold()
     while pending:
         stop()
-        folder = pending.pop()
+        folder = pending.popleft()
         key = os.path.normcase(str(folder))
         if key in visited:
             continue
@@ -132,20 +145,23 @@ def folder_search(query: str, roots: Sequence[str], stop: Callable[[], None]) ->
                         info = entry.stat(follow_symlinks=False)
                         if entry.is_symlink() or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                             continue
-                        if entry.is_dir(follow_symlinks=False):
+                        is_folder = entry.is_dir(follow_symlinks=False)
+                        if is_folder:
                             pending.append(Path(entry.path))
-                        elif entry.is_file(follow_symlinks=False) and needle in entry.name.casefold():
-                            rows.append(SearchFile(name=entry.name, path=entry.path))
+                        if needle in entry.name.casefold() and (is_folder or entry.is_file(follow_symlinks=False)):
+                            rows.append(SearchFile(name=entry.name, path=entry.path, isFolder=is_folder))
                             if len(rows) > LIMIT:
                                 truncated = True
                                 break
                     except OSError:
                         skipped += 1
+        except InterruptedError:
+            raise
         except OSError:
             skipped += 1
         if truncated:
             break
-    note = "Everything을 사용할 수 없어 추가한 분석 폴더와 그 하위 폴더에서만 찾았습니다."
+    note = "Everything 연결 없이 폴더를 직접 검색했습니다. 검색 시작 위치: " + ", ".join(roots)
     if skipped:
         note += f" 읽을 수 없는 위치 {skipped}개를 건너뛰었습니다."
     if truncated:
@@ -154,7 +170,7 @@ def folder_search(query: str, roots: Sequence[str], stop: Callable[[], None]) ->
                 elapsed=round((perf_counter() - start) * 1000), truncated=truncated, note=note)
 
 
-def search(query: str | None, roots: Sequence[str], stop: Callable[[], None] = lambda: None) -> SearchResult:
+def search(query: str | None, roots: Sequence[str] | None = None, stop: Callable[[], None] = lambda: None) -> SearchResult:
     """Search filenames without moving files or expanding organization scope."""
     if not isinstance(query, str):
         raise InvalidQuery()
@@ -166,17 +182,32 @@ def search(query: str | None, roots: Sequence[str], stop: Callable[[], None] = l
     result = None
     if os.name == "nt":
         try:
-            completed = subprocess.run(
+            with subprocess.Popen(
                 [sys.executable, "-B", "-X", "utf8", str(Path(__file__).resolve()), query],
-                stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW, check=True)
-            result = json.loads(completed.stdout)
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW) as proc:
+                try:
+                    while perf_counter() - start < 5:
+                        stop()
+                        try:
+                            output, _ = proc.communicate(timeout=0.08)
+                        except subprocess.TimeoutExpired:
+                            continue
+                        if proc.returncode == 0:
+                            result = json.loads(output)
+                        break
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.communicate()
+        except InterruptedError:
+            raise
         except (OSError, subprocess.SubprocessError, ValueError):
             # Missing SDK/client, incompatible instance or native IPC timeout.
             result = None
     stop()
     if result is None:
-        result = folder_search(query, roots, stop)
+        result = folder_search(query, drive_roots() if roots is None else roots, stop)
     result["elapsed"] = round((perf_counter() - start) * 1000)
     return result
 

@@ -13,11 +13,11 @@ const palettes=[
   ["#e7f0f2","#cde0e3","#779fa7","#9dc7ce","#81b6be","#426e78","#80aeb6"]
 ];
 const colors=g=>{const p=palettes[Math.max(0,data?.groups.indexOf(g)??0)%palettes.length];return ["wash","rim","back","front","fold","ink","dot"].map((k,i)=>"--"+k+":"+p[i]).join(";");};
-const titles={review:"파일 검토",matrix:"유사도 행렬",flow:"분석 과정"};
-let data=null,groups=new Map(),files=new Map(),view="review",scope=null,query="",groupQuery="",page=0;
+const titles={search:"파일 검색",review:"파일 검토",matrix:"유사도 행렬",flow:"분석 과정"};
+let data=null,groups=new Map(),files=new Map(),view="search",scope=null,query="",groupQuery="",page=0;
 let selected=new Set(),busy=false,scanBusy=false,renderId=0,toastTimer,dialogAction=null;
-let mxRow=0,mxCol=0,pair=null,options={recursive:false,deep:true,covers:true,roots:[]};
-let sourceBusy=false,searchVersion=0,destinationMode="new",destination=null;
+let mxRow=0,mxCol=0,pair=null,options={recursive:false,deep:true,covers:true,roots:[],folderMode:"reuse",minConfidence:0.7};
+let sourceDraft=null,searchVersion=0,liveVersion=0,searchTimer;
 let activeId=null,detailInfo=null,detailVersion=0,detailOpen=false,detailTab="evidence",relatedRows=null,relatedBusy=false,relatedError="";
 const compactDetails=window.matchMedia("(max-width:1199px)");
 const PAGE_SIZE=100;
@@ -55,51 +55,84 @@ function visibleFiles(){
   const q=query.trim().toLocaleLowerCase();
   return scopeFiles().filter(f=>!q||f.name.toLocaleLowerCase().includes(q));
 }
-async function scan(newOptions=options){
+async function scan(newOptions=options,openReview=true){
   if(busy)return;
-  scanBusy=true;setBusy(true);status("선택한 폴더 분석 중",true);renderSources();
+  scanBusy=true;setBusy(true);status("선택한 폴더 분석 중",true);
   try {
     data=await call("scan",{...options,...newOptions});options={...options,...data.options,roots:data.roots||data.options?.roots||options.roots};
     groups=new Map(data.groups.map(g=>[g.id,g]));files=new Map(data.files.map(f=>[f.id,f]));
     if(scope && scope!=="hold"&&!groups.has(scope))scope=null;
+    if(openReview&&view==="search")view="review";
     selected.clear();activeId=null;detailInfo=null;detailVersion++;detailOpen=false;pair=null;mxRow=0;mxCol=0;page=0;status("");render();
   } catch(e){status(e.message);if(!data)$("#content").innerHTML='<div class="panel empty">분석 폴더를 확인하거나 다른 폴더를 추가한 뒤 다시 분석하세요.</div>'; }
   finally{scanBusy=false;setBusy(false);renderSources();}
 }
+const confidenceDescriptions=[
+  "공통 주제 단서가 조금만 있어도 묶습니다.", "약한 단서가 있는 후보까지 넓게 봅니다.",
+  "작은 공통점이 있는 파일도 검토합니다.", "공통 단어와 보조 단서가 있는 후보를 포함합니다.",
+  "파일명이나 출처가 일부 겹치면 후보에 둡니다.", "여러 단서가 같은 주제를 가리키는 파일을 묶습니다.",
+  "공통 주제와 주변 파일의 관계가 맞는 묶음을 남깁니다.", "같은 프로젝트라는 근거가 뚜렷한 파일을 묶습니다.",
+  "소속이 뚜렷하고 다른 묶음과 잘 구분되는 파일만 남깁니다.", "이름이나 출처가 매우 강하게 일치해야 묶습니다.",
+  "추천 신뢰도가 1.0인 파일만 자동으로 묶습니다."
+];
 function renderSources(){
-  if($("#source-roots"))$("#source-roots").innerHTML=options.roots.map((p,i)=>'<div class="source-root" role="listitem"><span>'+icon("folder-open")+esc(p)+(i===0?' <small>(기본)</small>':'')+'</span><button class="btn" data-remove-root="'+i+'" aria-label="'+esc(p)+' 분석 폴더에서 제외" '+(busy||sourceBusy||i===0?"disabled":"")+'>제외</button></div>').join("")||'<p class="muted">분석 폴더를 불러오지 못했습니다. 폴더를 추가해 시작하세요.</p>';
-  if($('[data-action="addSource"]'))$('[data-action="addSource"]').disabled=busy||sourceBusy;
-  $("#root-path span").textContent="분석 폴더 "+options.roots.length+"개";
+  const roots=data?.roots||[];
+  $("#root-path summary").textContent=roots.length?"선택한 경로 · "+roots[0]+(roots.length>1?" 외 "+(roots.length-1)+"개":""):"";
+  $("#root-path ul").innerHTML=roots.map(p=>"<li>"+esc(p)+"</li>").join("");
+  if(!sourceDraft||!$("#source-roots"))return;
+  $("#source-roots").innerHTML=sourceDraft.roots.map((p,i)=>'<div class="source-root"><span>'+icon("folder-open")+esc(p)+'</span><button class="btn" data-remove-root="'+i+'" aria-label="'+esc(p)+' 제외">제외</button></div>').join("")||'<p class="muted">정리할 폴더를 추가하세요.</p>';
+  $("#new-folder-parent").textContent=sourceDraft.roots.length?"새 묶음의 기본 상위 폴더 · "+sourceDraft.roots[0]:"";
+  $('[data-action="submitDialog"]').disabled=!sourceDraft.roots.length;
 }
-function sourcesDialog(){
-  showDialog("분석 폴더","다운로드 폴더와 추가한 위치의 파일을 함께 검토합니다.",'<div id="source-roots" role="list"></div><p class="muted source-note">기본 다운로드 폴더는 유지됩니다. 추가 폴더를 제외해도 실제 파일은 그대로 남습니다.</p>',btn("close","닫기")+btn("addSource","폴더 추가","plus",true));
-  renderSources();
+async function sourcesDialog(){
+  const saved=await call("options");
+  sourceDraft={...saved,roots:[...saved.roots]};
+  const deepOptions=[["deep","애매한 파일의 본문 일부 확인"],["covers","대표 문서 표지에서 묶음 이름 찾기"]];
+  showDialog("파일 정리하기","선택한 폴더 바로 아래의 파일을 검토합니다.",
+    '<div class="setup-section"><h3>정리할 위치</h3><div id="source-roots"></div>'+btn("addSource","폴더 추가","plus")+'<p class="muted source-note" id="new-folder-parent"></p></div>'+
+    '<fieldset class="destination-options"><legend>정리할 폴더</legend>'+[
+      ["reuse","기존 폴더 활용","이름이나 안에 있는 파일이 잘 맞으면 그 폴더에 추가합니다."],
+      ["new","새 폴더로만 정리","이번에 선택한 파일끼리 새 폴더를 만듭니다."]
+    ].map(([v,t,d])=>'<label><input type="radio" name="folder-mode" value="'+v+'" '+(sourceDraft.folderMode===v?"checked":"")+'>'+t+'<small>'+d+'</small></label>').join("")+'</fieldset>'+
+    '<div class="setup-section"><label for="min-confidence">최소 신뢰도 <output id="min-value" for="min-confidence"></output></label><input type="range" id="min-confidence" min="0" max="1" step="0.1" value="'+sourceDraft.minConfidence+'" aria-describedby="min-description"><p id="min-description" class="muted"></p></div>'+
+    '<details class="setup-section"><summary>추가 분석 옵션</summary>'+deepOptions.map(([k,t])=>'<label class="setting">'+t+'<input type="checkbox" id="opt-'+k+'" '+(sourceDraft[k]?"checked":"")+'></label>').join("")+btn("bridge","브라우저 출처 연결","plugs-connected")+'</details>',
+    btn("close","취소")+btn("submitDialog","분석 시작","arrow-right",true),()=>{
+      const draft={...sourceDraft,folderMode:$('[name="folder-mode"]:checked').value,
+        minConfidence:Number($("#min-confidence").value),deep:$("#opt-deep").checked,covers:$("#opt-covers").checked};
+      close();return scan(draft);
+    });
+  const slider=$("#min-confidence");
+  slider.oninput=()=>{const v=Number(slider.value);$("#min-value").textContent=v.toFixed(1);
+    $("#min-description").textContent=confidenceDescriptions[Math.round(v*10)];};
+  slider.oninput();renderSources();
 }
-async function saveSources(roots){
-  sourceBusy=true;renderSources();
-  try{const result=await call("sources",{roots});options.roots=Array.isArray(result)?result:result.roots;return true;}
-  finally{sourceBusy=false;renderSources();}
-}
-async function addSource(path=null){
-  const chosen=path||await call("chooseFolder");if(!chosen)return;
-  if(!options.roots.some(p=>p.toLocaleLowerCase()===chosen.toLocaleLowerCase()))await saveSources([...options.roots,chosen]);
-  close();await scan();
+async function addSource(){
+  const chosen=await call("chooseFolder");
+  if(chosen&&sourceDraft&&!sourceDraft.roots.some(p=>p.toLowerCase()===chosen.toLowerCase())){
+    sourceDraft.roots.push(chosen);renderSources();
+  }
 }
 function parentPath(path){const i=Math.max(path.lastIndexOf("\\"),path.lastIndexOf("/"));return i===2&&path[1]===":"?path.slice(0,3):i===0?"/":path.slice(0,i);}
-function externalSearch(){
-  showDialog("다른 위치에서 찾기","현재 목록 필터와 별개로 PC의 파일 이름을 검색합니다.",
-    '<form id="external-search-form" class="external-search-form"><label for="external-query">찾을 파일 이름</label><div class="tools"><input id="external-query" class="field" type="search" required autocomplete="off" placeholder="예: 계약서, 여행, 프로젝트"><button class="btn primary" type="submit">찾기</button></div></form><p class="muted">결과는 자동으로 이동하지 않습니다. 필요한 파일의 상위 폴더를 분석 폴더에 추가한 뒤 추천을 검토하세요.</p><div id="external-results" aria-live="polite"></div>',btn("close","닫기"),null,true);
-  $("#external-query").focus();$("#external-search-form").onsubmit=async e=>{
-    e.preventDefault();const q=$("#external-query").value.trim();if(!q)return;
-    const version=++searchVersion,submit=e.target.querySelector('button[type="submit"]');submit.disabled=true;
-    $("#external-results").innerHTML='<p class="empty" role="status">다른 위치에서 찾는 중… 닫기를 누르면 결과 표시를 취소합니다.</p>';
+function liveSearch(){
+  clearTimeout(searchTimer);
+  const version=++liveVersion,query=$("#external-query").value.trim();
+  window.desktop.cancelSearch();
+  $("#search-rows").replaceChildren();$("#search-empty").hidden=false;
+  $("#search-meta").textContent="검색 범위 · 내 PC 전체";
+  $("#search-empty").textContent=query?"검색 중…":"이름을 입력하면 파일과 폴더가 여기에 표시됩니다.";
+  if(!query)return;
+  searchTimer=setTimeout(async()=>{
     try{
-      const result=await call("search",{query:q});if(version!==searchVersion||!$("#external-results"))return;
-      $("#external-results").innerHTML='<p class="search-meta">'+esc(result.backend)+' · '+esc(result.elapsed)+' ms'+(result.truncated?' · 일부 결과만 표시':"")+'</p><p class="muted">'+esc(result.note)+'</p>'+
-        (result.results.length?result.results.map(r=>'<article class="search-result"><strong>'+esc(r.name)+'</strong><p>'+esc(r.path)+'</p><button class="btn" data-add-parent="'+esc(parentPath(r.path))+'">이 상위 폴더 추가 후 분석</button></article>').join(""):'<p class="empty">일치하는 파일이 없습니다. 다른 파일 이름으로 찾아보세요.</p>');
-    }catch(err){if(version===searchVersion&&$("#external-results"))$("#external-results").innerHTML='<p class="empty" role="alert">'+esc(err.message)+'</p>';}
-    finally{if(submit.isConnected)submit.disabled=false;}
-  };
+      const result=await call("search",{query});
+      if(version!==liveVersion)return;
+      $("#search-meta").textContent=result.backend+" · "+result.results.length+"개"+(result.truncated?" · 일부 결과":"")+" · "+result.note;
+      $("#search-rows").innerHTML=result.results.map(r=>{
+        const glyph=r.icon?'<img class="shell-icon" src="'+esc(r.icon)+'" alt="">':icon(r.isFolder?"folder-open":"file-text");
+        return '<tr><td><span class="search-name" title="'+esc(r.name)+'">'+glyph+'<span>'+esc(r.name)+'</span></span></td><td title="'+esc(r.path)+'">'+esc(r.path)+'</td></tr>';
+      }).join("");
+      $("#search-empty").hidden=!!result.results.length;$("#search-empty").textContent="일치하는 파일이나 폴더가 없습니다.";
+    }catch(e){if(version===liveVersion)$("#search-empty").textContent=e.message;}
+  },120);
 }
 function nav(){
   $("#rail-count").textContent=data?.groups.length??0;
@@ -114,6 +147,13 @@ function render(){
   const generation=++renderId;nav();$("#crumb").textContent=titles[view];
   $("#headline").textContent=titles[view];renderSources();updateReviewBar();
   $("#content").classList.toggle("advanced-content",view!=="review");
+  const searching=view==="search";
+  $("#search-home").hidden=!searching;$("#content").hidden=searching;
+  $(".review-bar").hidden=searching;$("#root-path").hidden=searching||!data;
+  $('[data-action="scan"]').hidden=searching||!data;
+  $("#setup-label").textContent=searching?"파일 정리하기":"위치 · 기준 변경";
+  document.querySelectorAll('.rail-section,.group-search,#group-nav,.advanced').forEach(el=>el.hidden=searching);
+  if(searching){$("#external-query").focus();return;}
   if(!data)return;
   if(view==="review")review();
   else if(view==="matrix")matrix(generation).catch(errorDialog);
@@ -124,7 +164,7 @@ function updateReviewBar(){
   const eligible=(view==="review"?scopeFiles():data?.files||[]).filter(f=>f.group);
   $("#organize").disabled=busy||!eligible.length;
   $("#review-count").textContent=(view==="review"&&scope?scope==="hold"?"미분류 파일":groups.get(scope)?.title||"현재 묶음":"전체 추천 묶음")+" · 이동 대상 "+eligible.length+"개";
-  $("#review-hint").textContent=eligible.length?"위치를 선택하고 실제 이동 경로를 확인하세요.":"미분류 파일은 묶음을 지정하거나 선택 편집에서 개별 이동하세요.";
+  $("#review-hint").textContent=eligible.length?"확정하기 전에 파일별 원래 경로와 목적지를 확인하세요.":"미분류 파일은 묶음을 지정하거나 선택 편집에서 개별 이동하세요.";
 }
 function review(){
   const g=groups.get(scope),all=scopeFiles();
@@ -240,18 +280,6 @@ async function editForm(kind,gid){
     btn("close","취소")+btn("submitDialog","저장","check",true),()=>{const val=$("#value").value.trim();if(!val){$("#value").focus();return;}return applyEdit({...args,title:val});});
   $("#value").focus();$("#value").select();
 }
-function chooseDestination(){
-  destinationMode="new";destination=null;destinationDialog();
-}
-function destinationDialog(){
-  showDialog("정리할 위치 선택","추천 그룹을 검토한 뒤 원하는 위치로 정리하세요.",
-    '<fieldset class="destination-options"><legend>폴더 구성</legend><label><input type="radio" name="destination-mode" value="new" '+(destinationMode==="new"?"checked":"")+'> 새 그룹 폴더 만들기 <small>그룹별로 새 하위 폴더를 만듭니다.</small></label><label><input type="radio" name="destination-mode" value="existing" '+(destinationMode==="existing"?"checked":"")+'> 기존 폴더에 모으기 <small>선택한 폴더로 파일을 함께 옮깁니다.</small></label></fieldset><p class="preview-path" id="destination-path">'+esc(destination||(destinationMode==="new"?"기본 위치: "+data.root:"아직 폴더를 선택하지 않았습니다."))+'</p><div class="tools">'+btn("pickDestination",destinationMode==="new"?"다른 상위 폴더 선택":"기존 폴더 선택","folder-open")+(destinationMode==="new"&&destination?btn("defaultDestination","기본 위치 사용"):"")+'</div><p class="muted">다음 화면에서 파일마다 정확한 현재 경로와 이동할 경로를 확인합니다.</p>',
-    btn("close","취소")+btn("submitDialog","이동 경로 미리보기","arrow-right",true),()=>{
-      if(destinationMode==="existing"&&!destination){$("#destination-path").textContent="기존 폴더를 먼저 선택해 주세요.";$('[data-action="pickDestination"]').focus();return;}
-      return preview("organize",{destinationMode,...(destination?{destination}:{})});
-    });
-  document.querySelectorAll('[name="destination-mode"]').forEach(el=>el.onchange=()=>{destinationMode=el.value;destination=null;destinationDialog();});
-}
 async function preview(kind,args={}){
   const result=await call("preview",{kind,group:view==="review"&&scope!=="hold"?scope:null,files:[...selected],...args});
   if(!result)return;
@@ -260,11 +288,19 @@ async function preview(kind,args={}){
   const title=kind==="undo"?"최근 이동 되돌리기":"폴더 정리 미리보기";
   const body=[...byFolder].map(([p,fs])=>'<section class="move-group"><strong>'+icon("folder-notch")+esc(p)+'</strong>'+fs.map(f=>'<div class="move-row"><b>'+esc(f.name)+'</b>'+infoRows([["현재 경로",f.source],["이동할 경로",f.target]])+(f.skip?'<small>건너뜀 · '+esc(f.skip)+'</small>':"")+'</div>').join("")+'</section>').join("");
   showDialog(title,move.length+"개 파일 "+(kind==="undo"?"복원 예정":"이동 예정")+(rows.length>move.length?"   ·   "+(rows.length-move.length)+"개 건너뜀":""),
-    body||'<p class="empty">처리할 파일이 없습니다.</p>',btn("close","취소")+(move.length?btn("submitDialog",move.length+"개 파일 "+(kind==="undo"?"복원":"이동"),kind==="undo"?"arrow-counter-clockwise":"folder-simple-plus",true):""),
+    body||'<p class="empty">처리할 파일이 없습니다.</p>',btn("close","취소")+
+    (kind==="organize"&&move.length?btn("changeMoveParent","새 묶음의 상위 폴더 변경","folder-open"):"")+(move.length?btn("submitDialog",move.length+"개 파일 "+(kind==="undo"?"복원":"이동"),kind==="undo"?"arrow-counter-clockwise":"folder-simple-plus",true):""),
     async()=>{close();setBusy(true);status("파일 처리 중");let report;
       try{report=await call("execute",{token:result.token});}finally{setBusy(false);status("");}
-      await scan();showDialog("파일 처리 결과","",'<div class="result-lines">'+esc(report.join("\n"))+'</div>',btn("openDownloads","다운로드 폴더 열기","folder-open")+btn("close","닫기","check",true),null,true);
+      if(data)await scan(options,false);showDialog("파일 처리 결과","",'<div class="result-lines">'+esc(report.join("\n"))+'</div>',btn("close","닫기","check",true),null,true);
     },true);
+  const change=$('[data-action="changeMoveParent"]');
+  if(change)change.onclick=async()=>{
+    try{
+      const destination=await call("chooseFolder");
+      if(destination)await preview(kind,{...args,destination});
+    }catch(e){errorDialog(e);}
+  };
 }
 async function matrix(version){
   const n=data.files.length;mxRow=Math.min(mxRow,Math.max(0,Math.ceil(n/10)-1));mxCol=Math.min(mxCol,Math.max(0,Math.ceil(n/10)-1));
@@ -290,15 +326,10 @@ function flow(){
   const cards=[
     ["folder-open","파일 스캔",data.files.length+"개 파일의 이름·크기·위치·시각과 남아 있는 출처 정보를 읽었어요."],
     ["grid-nine","유사도 계산",(data.files.length*(data.files.length-1)/2).toLocaleString()+"쌍의 파일명, 반복 작업명, 용어 관계와 강좌 문맥을 비교했어요."],
-    ["intersect","그룹 생성","완전 연결 계층 클러스터링으로 추천 그룹 "+data.groups.length+"개를 만들었어요. 자동 병합 기준은 0.60이에요."],
+    ["intersect","그룹 생성","완전 연결 계층 클러스터링으로 추천 그룹 "+data.groups.length+"개를 만들었어요. 최소 추천 신뢰도는 "+data.options.minConfidence.toFixed(1)+"이에요."],
     ["file-text","선택적 추가 분석","중간 신뢰도 "+data.medium+"개 중 "+data.attempted+"개에 본문 발췌를 시도했고 "+data.rescued+"개를 추가 추천했어요."],
     ["bookmark-simple","그룹 이름 확인","저장된 이름과 확인된 강좌명을 확인하고, 과목명 확인용 표지 "+data.covers+"개를 살펴봤어요."]];
   $("#content").innerHTML='<div class="panel"><div class="section-head"><h2>이번 분석 결과</h2><span class="muted">'+data.time+'   ·   '+(data.elapsed/1000).toFixed(2)+'초</span></div>'+cards.map(([i,t,s])=>'<div class="flow-row">'+icon(i)+'<div><h3>'+t+'</h3><p class="muted">'+s+'</p></div></div>').join("")+'</div>';
-}
-function settings(){
-  const toggles=[["recursive","하위 폴더 포함","선택한 분석 폴더 안의 하위 폴더까지 분석"],["deep","애매한 파일만 본문 분석","중간 신뢰도 파일의 앞부분을 읽어 그룹 재검토"],["covers","문서 표지로 그룹 이름 찾기","대표 문서의 표지에서 이름 단서 확인 (예: 강의 자료)"]];
-  showDialog("분석 설정","",toggles.map(([k,t,p])=>'<label class="setting"><span><b>'+t+'</b><small>'+p+'</small></span><input type="checkbox" id="opt-'+k+'" '+(options[k]?"checked":"")+'></label>').join("")+'<div style="padding-top:16px">'+btn("bridge","브라우저 출처 연결 (선택)","plugs-connected")+'<p class="muted">확장 프로그램 없이도 파일 분석과 정리를 사용할 수 있습니다.</p></div>',
-    btn("close","취소")+btn("submitDialog","적용하고 다시 분석","arrows-clockwise",true),()=>{const val=Object.fromEntries(toggles.map(([k])=>[k,$("#opt-"+k).checked]));close();return scan(val);});
 }
 async function action(key){
   if(key==="close"){close();return;}
@@ -308,14 +339,11 @@ async function action(key){
   if(busy)return;
   switch(key){
     case "scan":return scan();
-    case "settings":return settings();
+    case "settings":return sourcesDialog();
     case "all":return setScope("all");
-    case "organize":return chooseDestination();
-    case "pickDestination":{const p=await call("chooseFolder");if(p){destination=p;destinationDialog();}return;}
-    case "defaultDestination":destination=null;return destinationDialog();
+    case "organize":return preview("organize",{destinationMode:options.folderMode});
     case "addSource":return addSource();
     case "sources":return sourcesDialog();
-    case "externalSearch":return externalSearch();
     case "history":return historyDialog();
     case "retryRelated":return loadRelated();
     case "undo":return preview("undo");
@@ -337,9 +365,8 @@ document.addEventListener("click",async e=>{
     const d=el.dataset;
     if(d.action)return await action(d.action);
     if(busy)return;
-    if(d.removeRoot!==undefined){await saveSources(options.roots.filter((_,i)=>i!==Number(d.removeRoot)));close();await scan();return;}
-    if(d.addParent)return await addSource(d.addParent);
-    if(d.view){view=d.view;scope=null;selected.clear();detailOpen=false;detailVersion++;render();return;}
+    if(d.removeRoot!==undefined){sourceDraft.roots.splice(Number(d.removeRoot),1);renderSources();return;}
+    if(d.view){if(d.view!=="search"&&!data)return await sourcesDialog();status("");view=d.view;scope=null;selected.clear();detailOpen=false;detailVersion++;render();return;}
     if(d.scope){setScope(d.scope);return;}
     if(d.fileEdit){const ids=editableIds();if(!ids.length)return;if(d.fileEdit==="unclassify")return await applyEdit({kind:"assign",files:ids,target:""});return await editForm(d.fileEdit,scope);}
     if(d.detailTab){detailTab=d.detailTab;renderInspector();if(detailTab==="related"&&relatedRows===null)return await loadRelated();return;}
@@ -360,7 +387,7 @@ document.addEventListener("click",async e=>{
   } catch(err){errorDialog(err);}
 });
 document.addEventListener("keydown",e=>{
-  if(e.ctrlKey&&e.key.toLowerCase()==="k"&&!$("#dialog").open){e.preventDefault();if(view!=="review"){view="review";render();}$("#search")?.focus();}
+  if(e.ctrlKey&&e.key.toLowerCase()==="k"&&!$("#dialog").open){e.preventDefault();if(view==="review")$("#search")?.focus();else{view="search";render();$("#external-query").focus();}}
   if(e.key==="Enter"&&e.target.matches("tr[data-file]")){e.preventDefault();detail(+e.target.dataset.file).catch(errorDialog);}
   if(e.key==="Enter"&&e.target.id==="value"&&e.target.tagName==="INPUT"){e.preventDefault();action("submitDialog").catch(errorDialog);}
   if(e.key==="Escape"&&!$("#dialog").open&&detailOpen){e.preventDefault();closeDetail();}
@@ -375,4 +402,5 @@ $("#group-search").oninput=e=>{groupQuery=e.target.value;nav();};
 compactDetails.addEventListener("change",syncInspector);
 window.desktop.status(t=>{if(busy)status(t,scanBusy);});
 $("#dialog").addEventListener("cancel",()=>{searchVersion++;dialogAction=null;});
-(async()=>{try{options={...options,...await call("options")};renderSources();await scan();}catch(e){renderSources();status(e.message);}})();
+$("#external-query").oninput=liveSearch;
+render();

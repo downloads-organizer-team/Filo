@@ -60,18 +60,19 @@ class CampusTests(unittest.TestCase):
         conflict.write_bytes(b"existing file")
         plan=storage.plan_group_folders(study)
         self.assertEqual(len(plan),11)
-        self.assertEqual(sum(bool(item.skip) for item in plan),1)
+        self.assertFalse(any(item.skip for item in plan))
         before={item.file.path:item.file.path.read_bytes() for item in plan}
         self.assertEqual([d for d in self.root.iterdir() if d.is_dir()],[existing])
         storage.move_files(plan,self.root)
         self.assertEqual(conflict.read_bytes(),b"existing file")
         for item in plan:
-            self.assertEqual(item.target.parent.name,item.file.group.title)
+            expected=item.file.group.title+(" (2)" if item.file.group is group else "")
+            self.assertEqual(item.target.parent.name,expected)
             self.assertEqual(item.file.path.exists(),bool(item.skip))
             if not item.skip:self.assertEqual(item.target.read_bytes(),before[item.file.path])
         self.assertTrue(all(f.path.is_file() for f in study.files if f.group is None))
-        repeated=storage.plan_group_folders(self.run_app(True)[0])
-        self.assertTrue(all(item.skip for item in repeated))
+        repeated=storage.plan_group_folders(engine.analyze(self.root,recursive=False))
+        self.assertEqual(repeated,[])
         log,_=storage.latest()
         storage.undo(log)
         self.assertTrue(all(path.read_bytes()==content for path,content in before.items()))
@@ -97,7 +98,7 @@ class CampusTests(unittest.TestCase):
         self.assertTrue(blocked.file.path.exists())
         self.assertTrue(all(f.path.exists() for f in first.members))
         log,_=storage.latest()
-        storage.undo(log)
+        self.assertIsNone(log)
         self.assertTrue(all(p.file.path.exists() for p in plan))
 
     def test_mixed_courses_and_selective_reading(self):

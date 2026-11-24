@@ -17,12 +17,33 @@ def assign_title(study,group,rules,read_covers=False):
         group.title,group.title_note=rules.course_titles[scope],"사용자가 확인한 과목명 · 같은 강좌 출처"
         group.title_kind="confirmed"
         return
-    name,note,group.title_kind=find_title(group.members,read_covers)
+    activities=[study.activities[f.index] for f in group.members]
+    named_activity=all(activities) and len({a.title.casefold() for a in activities})==1
+    name,note,group.title_kind=find_title(group.members,read_covers and not named_activity,
+                                         filename_prefix=not named_activity)
     if name:
         group.title,group.title_note=name,note
         return
     if group.title_kind=="conflict":
         group.title,group.title_note="과목명 확인 필요",note
+        return
+    if named_activity:
+        activity=activities[0]
+        editions={a.edition for a in activities if a.edition}
+        suffix=" "+next(iter(editions))+"기" if activity.kind=="프로그램" and len(editions)==1 else ""
+        group.title=activity.title+suffix
+        group.title_kind="activity"
+        group.title_note=f"파일 이름에 공통으로 나타난 {activity.kind} 이름 · {group.title}"
+        return
+    if all(study.opaque_formats[f.index] for f in group.members) and all(
+            study.primary[a.index][b.index]>=82 for i,a in enumerate(group.members) for b in group.members[:i]):
+        from datetime import datetime
+        recorded=all(study.download_times[f.index] is not None for f in group.members)
+        stamp=datetime.fromtimestamp(min(study.download_times[f.index] if recorded else f.created for f in group.members))
+        group.title=stamp.strftime("%Y-%m-%d %H시 %M분 다운로드")
+        group.title_kind="batch"
+        group.title_note=("형식이 같은 긴 식별자 · 기록된 다운로드 시각 차이 5분 이내" if recorded
+                          else "형식이 같은 긴 식별자 · 같은 다운로드 사이트와 2분 이내의 파일 생성 시각")
         return
     vectors=[study.vectors[f.index] for f in group.members]
     literal=Counter(k for vec in vectors for k in vec.literal if not SESSION_LABEL.fullmatch(k))
@@ -30,7 +51,10 @@ def assign_title(study,group,rules,read_covers=False):
     shared=[k for k,n in literal.items() if n==len(vectors)]
     group.title_note=note or "파일명에서 추정한 작업 · 그룹 이름을 확인하세요"
     if shared:
-        group.title=min(shared,key=lambda k:(-study.idf.get(k,0),k))
+        from topics import common_phrase
+        phrase=common_phrase(group.members,shared)
+        group.title=phrase or min(shared,key=lambda k:(-study.idf.get(k,0),k))
+        group.title_note="모든 파일 이름에 공통으로 나타난 주제 · "+group.title
     elif context:
         group.title=max(context,key=lambda k:(context[k],len(LEXICON[k])))
     else:

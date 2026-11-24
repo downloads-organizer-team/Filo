@@ -31,11 +31,15 @@ class SearchTests(unittest.TestCase):
         target.write_text("ticket")
         (self.downloads / "Jeju2026.pdf").write_text("different name")
         result = file_search.search("jeju[2026]", [str(self.downloads), str(self.extra), str(nested)])
-        self.assertEqual(result["results"], [{"name": target.name, "path": str(target)}])
+        self.assertEqual(result["results"], [{"name": target.name, "path": str(target), "isFolder":False}])
         self.assertEqual(result["backend"], "폴더 검색")
         self.assertFalse(result["truncated"])
 
     def test_search_reads_current_disk_state(self):
+        folder = self.extra / "directory.with.dots"
+        folder.mkdir()
+        self.assertEqual(file_search.search("with.dots", [str(self.extra)])["results"],
+                         [dict(name=folder.name,path=str(folder),isFolder=True)])
         target = self.extra / "trip.md"
         target.write_text("plan")
         target.rename(self.extra / "finished.md")
@@ -62,6 +66,13 @@ class SearchTests(unittest.TestCase):
             raise InterruptedError("cancel")
         with self.assertRaises(InterruptedError):
             file_search.search("trip", [str(self.extra)], cancelled)
+
+        (self.extra/"last.txt").touch()
+        checks=iter([False,True])
+        def cancel_during_directory_read():
+            if next(checks):raise InterruptedError("cancel")
+        with self.assertRaises(InterruptedError):
+            file_search.folder_search("trip",[str(self.extra)],cancel_during_directory_read)
 
 
 def verify_live_sdk():

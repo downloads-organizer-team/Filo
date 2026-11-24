@@ -1,7 +1,18 @@
 """Complete-link agglomeration with a reciprocal nearest-neighbour chain."""
-CUT=60
+from confidence import affinity_floor
+from course_source import relation
+
+
+def supported_pair(study,i,j):
+    a,b=study.files[i],study.files[j]
+    return (study.activities[i] is not None and study.activities[i]==study.activities[j]
+            or study.opaque_formats[i] and study.opaque_formats[j]
+            or study.task_prefixes[i] and study.task_prefixes[i]==study.task_prefixes[j]
+            or not study.vectors[i].literal.keys().isdisjoint(study.vectors[j].literal)
+            or relation(a,b)==1)
 
 def agglomerate(study,rules,stop):
+    cutoff=round(100*affinity_floor(study.min_confidence))
     units=[v[:] for v in rules.units.values() if v[0] not in rules.hold]
     count=len(units)
     # A forbidden edge stays zero under the minimum update for complete linkage.
@@ -19,7 +30,7 @@ def agglomerate(study,rules,stop):
         a=chain[-1];previous=chain[-2] if len(chain)>1 else None
         candidates=(b for b in active if b!=a)
         b=max(candidates,key=lambda k:(dist[a][k],k==previous,-k),default=None)
-        if b is None or dist[a][b]<CUT:
+        if b is None or dist[a][b]<cutoff:
             result.append(units[a]);active.remove(a);chain.pop()
         elif b==previous:
             del chain[-2:]
@@ -27,4 +38,5 @@ def agglomerate(study,rules,stop):
             for k in active:
                 if k!=b:dist[b][k]=dist[k][b]=min(dist[a][k],dist[b][k])
         else:chain.append(b)
-    return [sorted(u) for u in result if len(u)>=2 or u[0] in rules.fixed]
+    return [sorted(u) for u in result if len(u)>2 or any(i in rules.fixed for i in u)
+            or (len(u)==2 and (any(i in rules.separate for i in u) or supported_pair(study,*u)))]

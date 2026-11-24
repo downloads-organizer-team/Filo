@@ -14,7 +14,7 @@ def key(text):
 PREFIX=re.compile(r"^\s*(?:\d{1,3}[. )_-]+)?(.{2,70}?)[ _-]+(?:제?\d+\s*주(?:차|째)|강의\s*(?:보충|자료|\d)|(?:week|lecture|lec|chapter|chap)[ ._-]*\d)",re.I)
 
 
-def find_title(members,read_covers):
+def find_title(members,read_covers,*,filename_prefix=True):
     if len({f.course_scope for f in members if f.course_scope})>1:
         return "","서로 다른 강좌 출처 · 과목명 확인 필요","conflict"
 
@@ -30,7 +30,7 @@ def find_title(members,read_covers):
         for line in lines:
             name=labelled_title([line.strip()])
             if name:page_titles[key(name)]=name
-        match=PREFIX.match(f.path.stem)
+        match=PREFIX.match(f.path.stem) if filename_prefix else None
         if match:
             prefix=match[1].replace("_"," ").strip(" ._-")
             if usable_title(prefix) and key(prefix) not in GENERIC:

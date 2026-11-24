@@ -22,7 +22,7 @@ def refine(study,rules,stop):
     for i in study.medium:
         stop();f=study.files[i];r=rank(study,f,study.groups,rules)
         f.confidence=r.confidence;f.evidence=r.describe()
-        if i in study.extras and r.high:plans.append((r.confidence,i,r.group))
+        if i in study.extras and r.qualifies(study.min_confidence):plans.append((r.confidence,i,r.group))
     for conf,i,g in sorted(plans,key=lambda row:(-row[0],row[1])):
         if any(not rules.allowed(i,m.index) for m in g.members):continue
         f=study.files[i];f.group=g;f.state="2차 추천";f.note="문서 일부를 반영한 뒤 이 묶음과의 관련도가 높아졌습니다."

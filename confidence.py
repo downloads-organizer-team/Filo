@@ -11,13 +11,16 @@ class Ranking:
     neighbor:float=0
     cohesion:float=0
     confidence:float=0
-    @property
-    def high(self):
+    def qualifies(self,minimum):
         runner=self.affinity-self.margin
         required_gap=.25 if runner>=.60 else .10
-        return self.group is not None and self.affinity>=.60 and self.margin>=required_gap and self.confidence>=.62
+        return (self.group is not None and self.affinity>=affinity_floor(minimum)
+                and self.margin>=required_gap and self.confidence>=minimum)
     def describe(self):
         return f"가장 가까운 묶음 {self.affinity:.2f} · 차점과 차이 {self.margin:.2f} · 가까운 이웃 {self.neighbor:.2f} · 묶음 내부 {self.cohesion:.2f}"
+
+def affinity_floor(minimum):
+    return .5 + .1 * min(1,minimum/.7)
 
 def rank(study,f,groups,rules):
     candidates=[]
@@ -49,7 +52,7 @@ def detect(study,groups,rules):
             f.evidence="직접 지정한 소속은 추천 신뢰도 계산에서 제외합니다."
             continue
         r=rank(study,f,groups,rules);f.confidence=r.confidence;f.evidence=r.describe()
-        if r.high and r.group is not None and owners.get(f.index) is r.group:
+        if r.qualifies(study.min_confidence) and r.group is not None and owners.get(f.index) is r.group:
             f.group=r.group;f.first_band="높음";f.state="1차 추천";f.note="이름과 이웃 파일의 관계가 같은 묶음을 지지합니다."
             if any(m is not f and course_relation(f,m)==1 for m in f.group.members):
                 f.note="이 묶음의 다른 자료와 같은 강의 출처 단서가 다운로드 기록에 남아 있습니다."

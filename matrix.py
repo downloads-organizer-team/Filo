@@ -36,7 +36,8 @@ def related(study:Study,index:int) -> list[RelatedFile]:
         evidence=compare(study,index,other.index,details=True)
         assert isinstance(evidence,dict)
         signals=[]
-        for key,label in (("task","작업명"),("version","버전"),("sequence","번호 패턴"),
+        for key,label in (("activity","같은 활동 이름"),("batch","일괄 다운로드 단서"),
+                          ("task","작업명"),("version","버전"),("sequence","번호 패턴"),
                           ("folder","같은 폴더"),("source_page","같은 출처 페이지")):
             if evidence[key]:signals.append(label)
         if evidence["literal"]>=.2:signals.append("파일명 단어")

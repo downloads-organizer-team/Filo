@@ -7,6 +7,7 @@ const path = require("node:path");
 const root = path.dirname(__dirname);
 const allowed = new Set(["scan","options","sources","search","chooseFolder","detail","related","history","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
 const pending = new Map();
+const iconCache = new Map();
 let window, child, sequence=0, mutating=false;
 
 function startService() {
@@ -45,6 +46,16 @@ function call(action,args) {
   });
 }
 function isLocal(event) {return window && event.senderFrame===window.webContents.mainFrame;}
+async function fileIcon(row) {
+  const key=row.isFolder?"folder":"file:"+path.extname(row.name).toLowerCase();
+  if(!iconCache.has(key)){
+    if(iconCache.size>=256)iconCache.delete(iconCache.keys().next().value);
+    const icon=app.getFileIcon(row.path,{size:"small"})
+      .then(image=>image.isEmpty()?"":image.toDataURL()).catch(()=>"");
+    iconCache.set(key,icon);
+  }
+  return iconCache.get(key);
+}
 ipcMain.handle("desktop",async(event,action,args={})=>{
   if (!isLocal(event) || !allowed.has(action)) return {ok:false,error:"지원하지 않는 작업입니다."};
   if (action==="execute" && mutating) return {ok:false,error:"파일을 처리하고 있습니다."};
@@ -60,11 +71,15 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
       args={...args,destination:selected.filePaths[0]};
     }
     const reply=await call(action,args);
+    if(action==="search" && reply.ok){
+      await Promise.all(reply.value.results.map(async row=>{row.icon=await fileIcon(row);}));
+    }
     if (action==="bridge" && reply.ok) clipboard.writeText(reply.value);
     return reply;
   } finally {if (action==="execute") mutating=false;}
 });
 ipcMain.on("cancel",event=>{if(isLocal(event) && child) child.stdin.write('{"action":"cancel"}\n');});
+ipcMain.on("cancel-search",event=>{if(isLocal(event) && child)child.stdin.write('{"action":"cancelSearch"}\n');});
 
 function createWindow() {
   window=new BrowserWindow({width:1380,height:920,minWidth:870,minHeight:630,show:false,

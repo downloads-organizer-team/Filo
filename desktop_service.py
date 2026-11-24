@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from queue import Queue
 import sys
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Literal, overload
 from uuid import uuid4
 
@@ -16,6 +16,9 @@ from readers import course_cover
 from similarity import compare
 from models import Study, ScanOptions, ScanResult, FileRow, GroupRow, MoveRow, MovePreview, RelatedFile, HistoryEvent
 from file_search import SearchResult
+import file_search
+from existing_folders import recommend
+from refinement import summarize
 
 
 class Desktop:
@@ -36,20 +39,32 @@ class Desktop:
         self._study=value
 
     def options(self) -> ScanOptions:
-        recursive,deep,covers=storage.scan_options()
-        return ScanOptions(recursive=recursive,deep=deep,covers=covers,roots=storage.source_roots())
+        _,deep,covers=storage.scan_options()
+        minimum,mode=storage.organization_options()
+        return ScanOptions(recursive=False,deep=deep,covers=covers,roots=storage.source_roots(),
+                           minConfidence=minimum,folderMode=mode)
 
     def scan(self,args) -> ScanResult:
         settings=self.options()
-        for key in ("recursive","deep","covers"):
+        for key in ("deep","covers"):
             if isinstance(args.get(key),bool):settings[key]=args[key]
         def check():
             if self.cancel.is_set():raise InterruptedError("분석을 취소했습니다.")
         self.plan=None
         settings["roots"]=storage.validate_roots(args.get("roots",settings["roots"]))
-        study=engine.analyze(storage.downloads_folder(),settings["recursive"],settings["deep"],
-                             check,self.status,course_covers=settings["covers"],roots=settings["roots"])
-        storage.remember_options(settings["recursive"],settings["deep"],settings["covers"],settings["roots"])
+        if not settings["roots"]:raise ValueError("정리할 폴더를 하나 이상 선택하세요.")
+        minimum,mode=storage.validate_criteria(args.get("minConfidence",settings["minConfidence"]),
+                                                args.get("folderMode",settings["folderMode"]))
+        settings.update(minConfidence=minimum,folderMode=mode)
+        study=engine.analyze(settings["roots"][0],False,settings["deep"],check,self.status,
+                             course_covers=settings["covers"],roots=settings["roots"],min_confidence=minimum)
+        study.folder_mode=mode
+        if mode=="reuse":
+            self.status("기존 폴더와 파일 이름 대조 중")
+            recommend(study,check)
+            summarize(study)
+            study.groups.sort(key=lambda g:(g.title,g.gid))
+        storage.remember_options(False,settings["deep"],settings["covers"],settings["roots"],minimum,mode)
         self.study=study
         self.generation=uuid4().hex
         files=[FileRow(id=f.index,name=f.name,path=str(f.path),ext=f.ext,group=f.group.gid if f.group else None,
@@ -115,7 +130,7 @@ class Desktop:
         return True
 
     def preview(self,args) -> MovePreview:
-        s=self.study;kind=args.get("kind","organize");token=uuid4().hex
+        kind=args.get("kind","organize");token=uuid4().hex
         self.plan=None
         if kind=="undo":
             log,records=storage.latest()
@@ -123,9 +138,10 @@ class Desktop:
             rows=[MoveRow(name=Path(r["dst"]).name,source=r["dst"],target=r["src"],skip="") for r in records if storage.pending(r)]
             plan=log
         else:
+            s=self.study
             if kind=="organize":
                 plan=storage.plan_group_folders(s,self.group(args.get("group")),
-                                               args.get("destination"),args.get("destinationMode","new"))
+                                               args.get("destination"),args.get("destinationMode",s.folder_mode))
             elif kind=="manual":
                 destination=storage.check_directory(Path(args["destination"]))
                 plan=[storage.FolderMove(f,destination/f.name,"같은 이름의 파일이 있습니다" if (destination/f.name).exists() else "",
@@ -174,10 +190,9 @@ class Desktop:
             self.plan=None
             return self.options()
         if action=="search":
-            from file_search import search
-            def check():
-                if self.cancel.is_set():raise InterruptedError("검색을 취소했습니다.")
-            return search(args.get("query",""),self.options()["roots"],check)
+            return file_search.search(args.get("query",""))
+        if action=="preview" and args.get("kind")=="undo":return self.preview(args)
+        if action=="execute" and self.plan and self.plan[1]=="undo":return self.execute(args)
         if action=="openDownloads":
             os.startfile(storage.downloads_folder())
             return True
@@ -198,18 +213,40 @@ class Desktop:
         return getattr(self,action)(args)
 
 
+output_lock=Lock()
+
 def emit(payload):
-    print(json.dumps(payload,ensure_ascii=False,separators=(",",":")),flush=True)
+    with output_lock:
+        print(json.dumps(payload,ensure_ascii=False,separators=(",",":")),flush=True)
 
 def main():
     desk=Desktop(lambda msg:emit({"status":msg}))
     pending=Queue()
+    searches=Queue()
+    def search_worker():
+        while (item:=searches.get()) is not None:
+            request,cancelled=item
+            def check():
+                if cancelled.is_set():raise InterruptedError("검색을 취소했습니다.")
+            try:
+                check()
+                result=file_search.search(request.get("args",{}).get("query"),stop=check)
+                emit(dict(id=request["id"],ok=True,value=result))
+            except Exception as exc:
+                emit(dict(id=request["id"],ok=False,error=str(exc)))
+    Thread(target=search_worker,daemon=True).start()
     def receive():
+        last_search=Event()
         for line in sys.stdin:
             request=json.loads(line)
             if request["action"]=="cancel":desk.cancel.set()
+            elif request["action"] in ("search","cancelSearch"):
+                last_search.set()
+                if request["action"]=="search":
+                    last_search=Event()
+                    searches.put((request,last_search))
             else:pending.put(request)
-        desk.cancel.set();pending.put(None)
+        last_search.set();searches.put(None);desk.cancel.set();pending.put(None)
     Thread(target=receive,daemon=True).start()
     while (req:=pending.get()) is not None:
         try:

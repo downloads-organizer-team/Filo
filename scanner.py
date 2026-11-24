@@ -57,6 +57,8 @@ def scan(study, recursive, stop):
                                 bool(attrs & stat.FILE_ATTRIBUTE_OFFLINE)))
                     except OSError:
                         study.skipped += 1
+        except InterruptedError:
+            raise
         except OSError:
             if folder in roots: raise
             study.skipped += 1

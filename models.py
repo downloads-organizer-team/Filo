@@ -1,7 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
+if TYPE_CHECKING:
+    from topics import Activity
 from constraints import Constraints
 
 CourseNamespace = tuple[tuple[str,int|None],str] | tuple[tuple[str,int|None],str,str]
@@ -74,6 +76,7 @@ class Group:
     cohesion: float = 0
     title_note: str = ""
     title_kind: str = "topic"
+    destination: Path | None = None
 
 
 @dataclass
@@ -102,6 +105,10 @@ class Study:
     source_pages: list[tuple[str,str,str]|None] = field(default_factory=list)
     role_sets: list[frozenset[str]] = field(default_factory=list)
     download_times: list[float|None] = field(default_factory=list)
+    activities: list[Activity | None] = field(default_factory=list)
+    opaque_formats: list[tuple[str,int,tuple[int,...]] | None] = field(default_factory=list)
+    min_confidence: float = 0.7
+    folder_mode: str = "new"
 
 
 class ScanOptions(TypedDict):
@@ -109,6 +116,8 @@ class ScanOptions(TypedDict):
     deep: bool
     covers: bool
     roots: list[str]
+    minConfidence: float
+    folderMode: str
 
 
 class FileRow(TypedDict):
