@@ -17,7 +17,7 @@ const titles={search:"파일 검색",review:"파일 검토",matrix:"유사도 �
 let data=null,groups=new Map(),files=new Map(),view="search",scope=null,query="",groupQuery="",page=0;
 let selected=new Set(),busy=false,scanBusy=false,renderId=0,toastTimer,dialogAction=null;
 let mxRow=0,mxCol=0,pair=null,options={recursive:false,deep:true,covers:true,roots:[],folderMode:"reuse",minConfidence:0.7};
-let sourceDraft=null,searchVersion=0,liveVersion=0,searchTimer;
+let sourceDraft=null,searchVersion=0,liveVersion=0,searchTimer,retryOnReturn=false;
 let activeId=null,detailInfo=null,detailVersion=0,detailOpen=false,detailTab="evidence",relatedRows=null,relatedBusy=false,relatedError="";
 const compactDetails=window.matchMedia("(max-width:1199px)");
 const PAGE_SIZE=100;
@@ -113,30 +113,55 @@ async function addSource(){
   }
 }
 function parentPath(path){const i=Math.max(path.lastIndexOf("\\"),path.lastIndexOf("/"));return i===2&&path[1]===":"?path.slice(0,3):i===0?"/":path.slice(0,i);}
+async function showFileIcons(version){
+  const icons=await call("searchIcons");
+  if(version!==liveVersion)return;
+  for(const slot of document.querySelectorAll("[data-file-icon]")){
+    const src=icons[slot.dataset.fileIcon];
+    if(!src)continue;
+    const img=new Image();img.alt="";img.className="shell-icon";img.src=src;
+    slot.replaceWith(img);
+  }
+}
 function liveSearch(){
   clearTimeout(searchTimer);
+  retryOnReturn=false;
   const version=++liveVersion,query=$("#external-query").value.trim();
   window.desktop.cancelSearch();
-  $("#search-rows").replaceChildren();$("#search-empty").hidden=false;
-  $("#search-meta").textContent="검색 범위 · 내 PC 전체";
-  $("#search-empty").textContent=query?"검색 중…":"이름을 입력하면 파일과 폴더가 여기에 표시됩니다.";
+  const empty=$("#search-empty"),meta=$("#search-meta");
+  $("#search-rows").replaceChildren();empty.hidden=false;
+  meta.textContent="검색 범위 · Everything 색인";
+  empty.textContent=query?"Everything 검색 중…":"이름을 입력하면 파일과 폴더가 여기에 표시됩니다.";
   if(!query)return;
-  searchTimer=setTimeout(async()=>{
+  let retryDelay=250;
+  async function run(){
+    if(version!==liveVersion)return;
+    if(view!=="search"){retryOnReturn=true;return;}
     try{
       const result=await call("search",{query});
       if(version!==liveVersion)return;
       const shown=result.results.length.toLocaleString("ko-KR");
-      const count=result.total==null?"확인한 범위에서 "+shown+"개 표시":
-        result.total!==result.results.length?"색인 일치 "+result.total.toLocaleString("ko-KR")+"건 · "+shown+"개 경로 표시":"전체 "+shown+"개";
-      $("#search-meta").textContent=result.backend+" · "+count+" · "+result.note;
+      const count=result.total!==result.results.length?"색인 "+result.total.toLocaleString("ko-KR")+"건 · "+shown+"개 표시":"전체 "+shown+"개";
+      meta.textContent=result.backend+" · "+count;
       $("#search-rows").innerHTML=result.results.map(r=>{
-        const glyph=r.icon?'<img class="shell-icon" src="'+esc(r.icon)+'" alt="">':icon(r.isFolder?"folder-open":"file-text");
-        return '<tr><td><span class="search-name" title="'+esc(r.name)+'">'+glyph+'<span>'+esc(r.name)+'</span></span></td><td><div class="search-path"><span title="'+esc(r.path)+'">'+esc(r.path)+'</span><button class="icon-btn" data-copy-path="'+esc(r.path)+'" title="경로 복사" aria-label="'+esc(r.name)+' 경로 복사">'+icon("copy")+'</button></div></td></tr>';
+        const glyph=r.isFolder?'<i class="result-folder" aria-hidden="true"></i>':
+          '<i class="ph ph-file shell-icon" data-file-icon="'+esc(r.id)+'" aria-hidden="true"></i>';
+        return '<tr><td><button class="search-name" data-open-result="'+esc(r.id)+'" title="'+esc(r.name)+'" aria-label="'+esc(r.name)+(r.isFolder?' 폴더 열기':' 파일 열기')+'">'+glyph+'<span>'+esc(r.name)+'</span></button></td><td><div class="search-path"><span title="'+esc(r.path)+'">'+esc(r.path)+'</span><button class="icon-btn" data-copy-path="'+esc(r.path)+'" title="경로 복사" aria-label="'+esc(r.name)+' 경로 복사">'+icon("copy")+'</button></div></td></tr>';
       }).join("");
-      $("#search-empty").hidden=!!result.results.length;
-      $("#search-empty").textContent=result.total==null?"확인한 범위에서 일치하는 이름을 찾지 못했습니다.":"일치하는 파일이나 폴더가 없습니다.";
-    }catch(e){if(version===liveVersion)$("#search-empty").textContent=e.message;}
-  },120);
+      empty.hidden=!!result.results.length;
+      empty.textContent="일치하는 파일이나 폴더가 없습니다.";
+      if(result.results.some(r=>!r.isFolder))showFileIcons(version).catch(()=>{});
+    }catch(e){
+      if(version!==liveVersion)return;
+      empty.textContent=e.message;
+      if(e.code==="everythingUnavailable"){
+        meta.textContent="Everything 연결 대기 · 자동 재시도";
+        searchTimer=setTimeout(run,retryDelay);
+        retryDelay=Math.min(retryDelay*2,2000);
+      }
+    }
+  }
+  searchTimer=setTimeout(run,60);
 }
 function nav(){
   $("#rail-count").textContent=data?.groups.length??0;
@@ -157,7 +182,7 @@ function render(){
   $('[data-action="scan"]').hidden=searching||!data;
   $("#setup-label").textContent=searching?"파일 정리하기":"위치 · 기준 변경";
   document.querySelectorAll('.rail-section,.group-search,#group-nav,.advanced').forEach(el=>el.hidden=searching);
-  if(searching){$("#external-query").focus();return;}
+  if(searching){$("#external-query").focus();if(retryOnReturn)liveSearch();return;}
   if(!data)return;
   if(view==="review")review();
   else if(view==="matrix")matrix(generation).catch(errorDialog);
@@ -385,6 +410,7 @@ document.addEventListener("click",async e=>{
   try {
     const el=e.target.closest("button,input,tr[data-file]");if(!el)return;
     const d=el.dataset;
+    if(d.openResult){if(e.detail<2)await call("openSearchResult",{id:d.openResult});return;}
     if(d.copyPath){await navigator.clipboard.writeText(d.copyPath);toast("경로를 복사했어요.");return;}
     if(d.action)return await action(d.action);
     if(busy)return;

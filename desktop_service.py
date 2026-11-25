@@ -229,17 +229,28 @@ def main():
     pending=Queue()
     searches=Queue()
     def search_worker():
-        while (item:=searches.get()) is not None:
-            request,cancelled=item
-            def check():
-                if cancelled.is_set():raise InterruptedError("검색을 취소했습니다.")
+        worker=file_search.SearchWorker()
+        try:
             try:
-                check()
-                result=file_search.search(request.get("args",{}).get("query"),stop=check)
-                emit(dict(id=request["id"],ok=True,value=result))
-            except Exception as exc:
-                emit(dict(id=request["id"],ok=False,error=str(exc)))
-    Thread(target=search_worker,daemon=True).start()
+                worker.request(None)
+            except OSError:
+                pass  # The current query retries when Everything starts later.
+            while (item:=searches.get()) is not None:
+                request,cancelled=item
+                def check():
+                    if cancelled.is_set():raise InterruptedError("검색을 취소했습니다.")
+                try:
+                    check()
+                    query=file_search.validate_query(request.get("args",{}).get("query"))
+                    result=worker.request(query,check)
+                    emit(dict(id=request["id"],ok=True,value=result))
+                except Exception as exc:
+                    code="everythingUnavailable" if isinstance(exc,file_search.EverythingUnavailable) else "error"
+                    emit(dict(id=request["id"],ok=False,error=str(exc),code=code))
+        finally:
+            worker.close()
+    search_thread=Thread(target=search_worker,daemon=True)
+    search_thread.start()
     def receive():
         last_search=Event()
         for line in sys.stdin:
@@ -261,5 +272,6 @@ def main():
         except Exception as exc:
             emit(dict(id=req["id"],ok=False,error=str(exc) or type(exc).__name__,
                       code="courseConflict" if isinstance(exc,feedback.CourseConflict) else "error"))
+    search_thread.join()
 
 if __name__=="__main__":main()

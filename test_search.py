@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from contextlib import contextmanager
 import json
 import os
 import subprocess
@@ -7,72 +8,72 @@ import sys
 from threading import Timer
 from time import perf_counter, sleep
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import file_search
 
 
 class SearchTests(unittest.TestCase):
-    root=Path()
-    downloads=Path()
-    extra=Path()
     def setUp(self):
-        self.root = Path(self.enterContext(TemporaryDirectory()))
-        self.downloads = self.root / "Downloads"
-        self.extra = self.root / "Projects"
-        self.downloads.mkdir()
-        self.extra.mkdir()
-        self.enterContext(patch.dict("os.environ", {"MOA_EVERYTHING_DLL": str(self.root / "absent.dll")}))
+        self.root=Path(self.enterContext(TemporaryDirectory()))
+        self.extra=self.root/"Projects"
+        self.downloads=self.root/"Downloads"
 
-    def test_fallback_finds_literal_filename_across_roots_and_overlaps(self):
-        nested = self.extra / "Nested"
-        nested.mkdir()
-        target = nested / "Jeju[2026].pdf"
-        target.write_text("ticket")
-        (self.downloads / "Jeju2026.pdf").write_text("different name")
-        result = file_search.search("jeju[2026]", [str(self.downloads), str(self.extra), str(nested)])
-        self.assertEqual(result["results"], [{"name": target.name, "path": str(target), "isFolder":False}])
-        self.assertEqual(result["backend"], "폴더 검색")
-        self.assertEqual(result["total"], 1)
-        self.assertFalse(result["truncated"])
+    def test_missing_sdk_never_returns_files_from_the_disk(self):
+        (self.root/"available.txt").touch()
+        with patch.dict(os.environ,MOA_EVERYTHING_DLL=str(self.root/"absent.dll")):
+            with self.assertRaises(file_search.SdkMissing):
+                file_search.search("available")
 
-    def test_search_reads_current_disk_state(self):
-        folder = self.extra / "directory.with.dots"
-        folder.mkdir()
-        self.assertEqual(file_search.search("with.dots", [str(self.extra)])["results"],
-                         [dict(name=folder.name,path=str(folder),isFolder=True)])
-        target = self.extra / "trip.md"
-        target.write_text("plan")
-        target.rename(self.extra / "finished.md")
-        self.assertEqual(file_search.search("trip", [str(self.extra)])["results"], [])
-        result = file_search.search("finished", [str(self.extra)])
-        self.assertEqual([r["path"] for r in result["results"]], [str(self.extra / "finished.md")])
+    def test_invalid_query_does_not_start_worker(self):
+        with patch("file_search.SearchWorker") as worker:
+            for query in (""," ","*","file:","a\x00b","x"*201,None):
+                with self.subTest(query=query),self.assertRaises(file_search.InvalidQuery):
+                    file_search.search(query)
+            worker.assert_not_called()
 
-    def test_invalid_input_does_not_expand_to_every_file(self):
-        for query in ("", " ", "*", "file:", "a\x00b", "x" * 201, None):
-            with self.subTest(query=query), self.assertRaises(file_search.InvalidQuery):
-                file_search.search(query, [str(self.extra)])
+    def test_connection_is_reused_and_index_readiness_is_checked(self):
+        with patch("file_search.load_sdk") as load,patch("file_search.query_client") as query:
+            sdk=load.return_value
+            sdk.Everything3_IsDBLoaded.side_effect=[False,True,True]
+            client=file_search.SdkClient()
+            with self.assertRaises(file_search.EverythingUnavailable):
+                client.search("pending")
+            query.assert_not_called()
+            client.search("first")
+            client.search("second")
+            self.assertEqual(sdk.Everything3_ConnectW.call_count,2)
+            self.assertEqual(query.call_count,2)
+            client.close()
 
-    def test_result_limit_is_reported_and_missing_root_is_not_fatal(self):
-        for i in range(4):
-            (self.extra / f"receipt-{i}.txt").touch()
-        with patch.object(file_search, "LIMIT", 2):
-            result = file_search.search("receipt", [str(self.root / "missing"), str(self.extra)])
-        self.assertEqual(len(result["results"]), 2)
-        self.assertTrue(result["truncated"])
-        self.assertIsNone(result["total"])
-        self.assertTrue(all(Path(row["path"]).is_file() for row in result["results"]))
+    def test_start_only_one_registered_installation_on_disconnect(self):
+        worker=file_search.SearchWorker()
+        worker.process=Mock()
+        exe=Path("C:/Program Files/Everything/Everything.exe")
+        with patch.dict(os.environ),patch("file_search.installed_everything",return_value=exe),patch("file_search.subprocess.Popen") as launch:
+            os.environ.pop("MOA_EVERYTHING_INSTANCE",None)
+            for status in ("loading","offline","offline"):
+                worker.replies.put((status,"waiting"))
+                with self.assertRaises(file_search.EverythingUnavailable):
+                    worker.request(None)
+                if status=="loading":launch.assert_not_called()
+            self.assertEqual(launch.call_args.args[0],[str(exe),"-startup"])
+            launch.assert_called_once()
 
-    def test_incomplete_empty_search_does_not_claim_zero_total(self):
-        with patch.object(file_search,"ENTRY_LIMIT",0):
-            (self.extra/"unrelated.txt").touch()
-            limited=file_search.folder_search("missing",[str(self.extra)],lambda:None)
-        skipped=file_search.folder_search("missing",[str(self.root/"unavailable")],lambda:None)
-        for result in (limited,skipped):
-            self.assertEqual(result["results"],[])
-            self.assertIsNone(result["total"])
-        complete=file_search.folder_search("missing",[str(self.extra)],lambda:None)
-        self.assertEqual(complete["total"],0)
+    def test_custom_instance_is_not_replaced_with_default_installation(self):
+        worker=file_search.SearchWorker()
+        worker.process=Mock()
+        worker.replies.put(("offline","waiting"))
+        with patch.dict(os.environ,MOA_EVERYTHING_INSTANCE="test-instance"),patch("file_search.installed_everything") as locate:
+            with self.assertRaises(file_search.EverythingUnavailable):worker.request(None)
+            locate.assert_not_called()
+
+    def test_cancelled_search_does_not_start_process(self):
+        worker=file_search.SearchWorker()
+        def cancelled():raise InterruptedError("cancel")
+        with self.assertRaises(InterruptedError):
+            worker.request("trip",cancelled)
+        self.assertIsNone(worker.process)
 
     def test_sdk_keeps_index_total_and_deduplicates_only_identical_paths(self):
         paths=[str(self.extra/"same.txt"),str(self.extra/"same.txt"),str(self.downloads/"same.txt")]
@@ -95,20 +96,6 @@ class SearchTests(unittest.TestCase):
             self.assertTrue(capped["truncated"])
             self.assertEqual(capped["total"],410)
 
-    def test_cancellation_propagates(self):
-        def cancelled():
-            raise InterruptedError("cancel")
-        with self.assertRaises(InterruptedError):
-            file_search.search("trip", [str(self.extra)], cancelled)
-
-        (self.extra/"last.txt").touch()
-        checks=iter([False,True])
-        def cancel_during_directory_read():
-            if next(checks):raise InterruptedError("cancel")
-        with self.assertRaises(InterruptedError):
-            file_search.folder_search("trip",[str(self.extra)],cancel_during_directory_read)
-
-
 def verify_live_sdk(query="Everything.exe",expected=None):
     """Opt-in real IPC proof: python -B -X utf8 test_search.py --sdk."""
     with TemporaryDirectory(prefix="moa-sdk-") as temporary:
@@ -120,15 +107,20 @@ def verify_live_sdk(query="Everything.exe",expected=None):
             creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0,
         ) as service:
             assert service.stdin is not None and service.stdout is not None
-            deadline=Timer(10,service.kill)
+            deadline=Timer(25,service.kill)
             deadline.start()
             try:
                 started=perf_counter()
-                service.stdin.write(json.dumps(dict(id=1,action="search",args=dict(query=query)))+"\n")
-                service.stdin.flush()
-                # Keep stdin open, exactly as Electron does while awaiting a reply.
-                response=json.loads(service.stdout.readline())
-                assert response["ok"],response
+                attempts=0
+                while True:
+                    attempts+=1
+                    service.stdin.write(json.dumps(dict(id=attempts,action="search",args=dict(query=query)))+"\n")
+                    service.stdin.flush()
+                    # Keep stdin open, exactly as Electron does while awaiting a reply.
+                    response=json.loads(service.stdout.readline())
+                    if response["ok"]:break
+                    assert response.get("code")=="everythingUnavailable" and perf_counter()-started<20,response
+                    sleep(.25)
                 result=response["value"]
                 assert result["backend"]=="Everything 1.5 SDK",result
                 assert result["total"]>=len(result["results"])
@@ -136,13 +128,31 @@ def verify_live_sdk(query="Everything.exe",expected=None):
                 matches=[Path(r["path"]) for r in result["results"] if r["name"].casefold()==query.casefold()]
                 assert any(p.is_file() and (expected is None or p==expected) for p in matches),result
                 print(json.dumps(dict(scenario="live SDK through open-stdin desktop IPC",
-                                      backend=result["backend"],elapsed_ms=result["elapsed"],
+                                      backend=result["backend"],attempts=attempts,elapsed_ms=result["elapsed"],
                                       total_ms=round((perf_counter()-started)*1000),passed=True)))
             finally:
                 service.stdin.close()
                 try:service.wait(timeout=3)
                 except subprocess.TimeoutExpired:service.kill();service.wait()
                 deadline.cancel()
+
+
+@contextmanager
+def isolated_instance(executable,base,inbox,name):
+    ini=base/"Everything.ini"
+    ini.write_text("[Everything]\nrun_as_admin=0\nshow_in_tray=0\n",encoding="utf-8")
+    proc=subprocess.Popen([str(executable),"-instance",name,"-config",str(ini),"-no-db","-no-auto-index",
+                           "-folders",str(inbox),"-startup"],cwd=base)
+    try:
+        yield
+    finally:
+        if proc.poll() is None:
+            try:
+                subprocess.run([str(executable),"-instance",name,"-exit"],timeout=5,check=True)
+                proc.wait(timeout=5)
+            except (subprocess.TimeoutExpired,subprocess.CalledProcessError):
+                proc.terminate()
+                proc.wait(timeout=5)
 
 
 def verify_isolated_sdk(executable):
@@ -152,30 +162,29 @@ def verify_isolated_sdk(executable):
         inbox.mkdir()
         sample=inbox/"색인 확인 [42].txt"
         sample.touch()
-        name=base.name
-        ini=base/"Everything.ini"
-        ini.write_text("[Everything]\nrun_as_admin=0\nshow_in_tray=0\n",encoding="utf-8")
-        proc=subprocess.Popen([executable,"-instance",name,"-config",str(ini),"-no-db",
-                               "-volumes","","-folders",str(inbox),"-startup"],cwd=base)
-        try:
-            with patch.dict(os.environ,MOA_EVERYTHING_INSTANCE=name):
+        folder=inbox/"색인 확인 [42].folder"
+        folder.mkdir()
+        stem="색인 확인 [42]"
+        (inbox/"색인 확인 4.txt").touch()
+        with patch.dict(os.environ,MOA_EVERYTHING_INSTANCE=base.name),isolated_instance(executable,base,inbox,base.name):
+            worker=file_search.SearchWorker()
+            try:
                 deadline=perf_counter()+15
                 while perf_counter()<deadline:
-                    result=file_search.search(sample.name,roots=[])
-                    if result["backend"]=="Everything 1.5 SDK" and result["results"]:
-                        break
-                    sleep(.2)
-                else:
-                    raise AssertionError("The isolated Everything instance did not index the test file")
+                    try:
+                        result=worker.request(stem)
+                        if result["total"]==2:break
+                    except file_search.EverythingUnavailable:
+                        pass
+                    sleep(.15)
+                else:raise AssertionError("The temporary items were not indexed")
+                for _ in range(3):
+                    result=worker.request(stem)
+                    assert {Path(r["path"]):r["isFolder"] for r in result["results"]}=={sample:False,folder:True}
+                    print("Warm SDK query (ms):",result["elapsed"])
                 verify_live_sdk(sample.name,sample)
-        finally:
-            if proc.poll() is None:
-                try:
-                    subprocess.run([executable,"-instance",name,"-exit"],timeout=5,check=True)
-                    proc.wait(timeout=5)
-                except (subprocess.TimeoutExpired,subprocess.CalledProcessError):
-                    proc.terminate()
-                    proc.wait(timeout=5)
+            finally:
+                worker.close()
 
 
 if __name__=="__main__":

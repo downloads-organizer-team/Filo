@@ -1,4 +1,4 @@
-const {app, BrowserWindow, ipcMain, dialog, clipboard} = require("electron");
+const {app, BrowserWindow, ipcMain, dialog, clipboard, shell} = require("electron");
 const {spawn} = require("node:child_process");
 const {existsSync} = require("node:fs");
 const {createInterface} = require("node:readline");
@@ -8,6 +8,8 @@ const root = path.dirname(__dirname);
 const allowed = new Set(["scan","options","sources","search","chooseFolder","detail","related","history","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
 const pending = new Map();
 const iconCache = new Map();
+const searchRows = new Map();
+let searchRevision=0;
 let window, child, sequence=0, mutating=false;
 
 function startService() {
@@ -47,7 +49,7 @@ function call(action,args) {
 }
 function isLocal(event) {return window && event.senderFrame===window.webContents.mainFrame;}
 async function fileIcon(row) {
-  const key=row.isFolder?"folder":"file:"+path.extname(row.name).toLowerCase();
+  const key=path.extname(row.name).toLowerCase();
   if(!iconCache.has(key)){
     if(iconCache.size>=256)iconCache.delete(iconCache.keys().next().value);
     const icon=app.getFileIcon(row.path,{size:"small"})
@@ -57,7 +59,20 @@ async function fileIcon(row) {
   return iconCache.get(key);
 }
 ipcMain.handle("desktop",async(event,action,args={})=>{
-  if (!isLocal(event) || !allowed.has(action)) return {ok:false,error:"지원하지 않는 작업입니다."};
+  if (!isLocal(event)) return {ok:false,error:"지원하지 않는 작업입니다."};
+  if(action==="openSearchResult"){
+    const row=searchRows.get(args.id);
+    if(!row||!path.isAbsolute(row.path))return {ok:false,error:"검색 결과가 바뀌었습니다. 이름을 다시 선택하세요."};
+    const error=await shell.openPath(row.path);
+    return error?{ok:false,error:"열 수 없습니다. 파일 위치와 기본 앱을 확인하세요. "+error}:{ok:true,value:true};
+  }
+  if(action==="searchIcons"){
+    const revision=searchRevision;
+    const icons=await Promise.all([...searchRows].filter(([,row])=>!row.isFolder)
+      .map(async ([id,row])=>[id,await fileIcon(row)]));
+    return {ok:true,value:revision===searchRevision?Object.fromEntries(icons):{}};
+  }
+  if (!allowed.has(action)) return {ok:false,error:"지원하지 않는 작업입니다."};
   if (action==="execute" && mutating) return {ok:false,error:"파일을 처리하고 있습니다."};
   if (action==="execute") mutating=true;
   try {
@@ -70,18 +85,28 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
       if (selected.canceled) return {ok:true,value:null};
       args={...args,destination:selected.filePaths[0]};
     }
+    const revision=action==="search"?++searchRevision:null;
+    if(revision!==null)searchRows.clear();
     const reply=await call(action,args);
-    if(action==="search" && reply.ok){
-      await Promise.all(reply.value.results.map(async row=>{row.icon=await fileIcon(row);}));
+    if(action==="search" && reply.ok && revision===searchRevision){
+      reply.value.results.forEach((row,i)=>{
+        row.id=revision+"-"+i;
+        searchRows.set(row.id,row);
+      });
     }
     if (action==="bridge" && reply.ok) clipboard.writeText(reply.value);
     return reply;
   } finally {if (action==="execute") mutating=false;}
 });
 ipcMain.on("cancel",event=>{if(isLocal(event) && child) child.stdin.write('{"action":"cancel"}\n');});
-ipcMain.on("cancel-search",event=>{if(isLocal(event) && child)child.stdin.write('{"action":"cancelSearch"}\n');});
+ipcMain.on("cancel-search",event=>{
+  if(!isLocal(event))return;
+  searchRevision++;searchRows.clear();
+  if(child)child.stdin.write('{"action":"cancelSearch"}\n');
+});
 
 function createWindow() {
+  startService();
   window=new BrowserWindow({width:1380,height:920,minWidth:870,minHeight:630,show:false,
     title:"다운로드 정리",backgroundColor:"#f9f9fc",autoHideMenuBar:true,
     icon:path.join(root,"icons","brand.png"),titleBarStyle:"hidden",

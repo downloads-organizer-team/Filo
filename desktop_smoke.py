@@ -6,12 +6,15 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
+from contextlib import ExitStack
+
+from test_search import isolated_instance
 
 
-def verify(executable):
+def verify(executable,everything):
     from playwright.sync_api import sync_playwright, expect
 
-    with TemporaryDirectory(prefix="organizer-ui-") as temporary:
+    with TemporaryDirectory(prefix="organizer-ui-") as temporary, ExitStack() as resources:
         base=Path(temporary)
         downloads,extra,state,profile=(base/k for k in ("Downloads","Projects","State","Profile"))
         for path in (downloads,extra,state):
@@ -22,8 +25,17 @@ def verify(executable):
         (extra/"보관").mkdir()
         (extra/"보관"/"옛 문서.txt").touch()
         (state/"download-settings.json").write_text(json.dumps({"roots":[str(downloads),str(extra)]}),encoding="utf-8")
-        env=dict(os.environ,MOA_HOME=str(state),MOA_DOWNLOADS=str(downloads),
-                 MOA_EVERYTHING_DLL=str(base/"missing.dll"))
+        inbox=base/"Search"
+        inbox.mkdir()
+        prefix="ui-check-"+base.name
+        folder=inbox/(prefix+".folder")
+        folder.mkdir()
+        marker=inbox/"opened.marker"
+        script=inbox/(prefix+".cmd")
+        script.write_text('@echo off\necho opened>"%~dp0opened.marker"\n',encoding="ascii")
+        for i in range(50):(inbox/f"{prefix}-{i:02}.txt").touch()
+        env=dict(os.environ,MOA_HOME=str(state),MOA_DOWNLOADS=str(downloads),MOA_EVERYTHING_INSTANCE=base.name)
+        env.pop("MOA_EVERYTHING_DLL",None)
         env.pop("ELECTRON_RUN_AS_NODE",None)
         process=subprocess.Popen([executable,"--remote-debugging-port=0","--remote-debugging-address=127.0.0.1",
                                   "--user-data-dir="+str(profile),str(Path(__file__).resolve().parent/"desktop")],
@@ -44,10 +56,39 @@ def verify(executable):
                 expect(page.locator("#external-query")).to_be_focused()
                 assert not (state/"feedback.sqlite3").exists()
                 search=page.locator("#external-query")
-                search.fill("explorer")
-                search.fill("explorer.exe")
-                expect(page.locator("#search-rows")).to_contain_text("explorer.exe",timeout=15000,ignore_case=True)
+                search.fill("discarded-query")
+                search.fill(prefix)
+                expect(page.locator("#search-meta")).to_contain_text("자동 재시도")
+                expect(page.locator("#search-rows tr")).to_have_count(0)
+                resources.enter_context(isolated_instance(everything,base,inbox,base.name))
+                rows=page.locator("#search-rows tr")
+                expect(rows).to_have_count(52,timeout=25000)
+                expect(page.locator("#search-meta")).to_contain_text("Everything 1.5 SDK")
                 expect(page.locator("#search-rows img").first).to_be_visible()
+                directory=page.get_by_role("button",name=folder.name+" 폴더 열기",exact=True)
+                expect(directory.locator(".result-folder")).to_be_visible()
+                height=rows.first.bounding_box()["height"]
+                viewport=page.locator(".search-list .table-scroll").bounding_box()["height"]
+                assert height<=24 and viewport/height>=20,(height,viewport)
+                print(f"Search row {height:g}px; {int((viewport-24)//height)} complete rows fit")
+                # Observe the completed real Windows shell dispatch for a temporary directory.
+                page.evaluate("""() => {
+                    const invoke=call;
+                    call=async (action,args)=>{
+                        const result=await invoke(action,args);
+                        if(action==="openSearchResult")window.openedResult=args.id;
+                        return result;
+                    };
+                }""")
+                await_id=directory.get_attribute("data-open-result")
+                directory.click()
+                page.wait_for_function("id=>window.openedResult===id",arg=await_id)
+                launch=page.get_by_role("button",name=script.name+" 파일 열기",exact=True)
+                launch.press("Enter")
+                deadline=monotonic()+5
+                while not marker.exists() and monotonic()<deadline:sleep(.05)
+                assert marker.exists(),"The selected test file did not run"
+                stale=await_id
                 # Keep the Windows user's clipboard intact while checking which path is copied.
                 copy=page.locator("[data-copy-path]").first
                 path=copy.get_attribute("data-copy-path")
@@ -56,8 +97,15 @@ def verify(executable):
                 copy.press("Enter")
                 expect(page.locator("#toast")).to_contain_text("경로를 복사")
                 assert page.evaluate("window.copiedPath")==path
+                resources.close()
+                search.fill(prefix+"-00")
+                expect(page.locator("#search-meta")).to_contain_text("자동 재시도",timeout=15000)
+                resources.enter_context(isolated_instance(everything,base,inbox,base.name))
+                expect(rows).to_have_count(1,timeout=20000)
+                expect(rows.first).to_contain_text(prefix+"-00.txt")
                 search.fill("")
                 expect(page.locator("#search-rows tr")).to_have_count(0)
+                assert not page.evaluate("id=>window.desktop.call('openSearchResult',{id})",stale)["ok"]
                 page.get_by_role("button",name="파일 정리하기").click()
                 dialog=page.get_by_role("dialog")
                 slider=dialog.get_by_role("slider")
@@ -108,7 +156,7 @@ def verify(executable):
                 assert len(list(extra.glob("*.txt")))==4
                 assert (extra/"보관"/"옛 문서.txt").exists()
                 assert not errors,errors
-                print("PASS: live search, path copy action, 11 thresholds, roots, filtered and checked previews, move and undo")
+                print("PASS: delayed startup, reconnect, compact rows, folder icons, shell open, path copy, review, move and undo")
                 page.close()
         finally:
             try:
@@ -119,4 +167,4 @@ def verify(executable):
 
 
 if __name__=="__main__":
-    verify(sys.argv[1])
+    verify(sys.argv[1],sys.argv[2] if len(sys.argv)>2 else str(Path(os.environ["ProgramFiles"])/"Everything"/"Everything.exe"))

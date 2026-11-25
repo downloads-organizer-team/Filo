@@ -201,9 +201,11 @@ class SourceTests(unittest.TestCase):
     def test_search_without_scan_is_independent_of_organization_roots(self):
         target=self.extra/"alpha.txt";target.write_text("project")
         self.app.run("sources",dict(roots=[str(self.root)]))
-        with patch.dict(os.environ,MOA_EVERYTHING_DLL=str(self.extra/"absent.dll")), patch("file_search.drive_roots",return_value=[str(self.extra)]):
+        rows=[dict(name="alpha.txt",path=str(target),isFolder=False)]
+        with patch("file_search.search",return_value={"results":rows}) as search:
             result=self.app.run("search",dict(query="alpha"))
-        self.assertEqual(result["results"],[dict(name="alpha.txt",path=str(target),isFolder=False)])
+        search.assert_called_once_with("alpha")
+        self.assertEqual(result["results"],rows)
 
     def test_related_view_is_bounded_and_excludes_unrelated_files(self):
         for number in range(1,9):(self.extra/f"별빛_시안_v{number}.txt").touch()

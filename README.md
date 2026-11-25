@@ -66,10 +66,10 @@
 
 ## 다른 위치에서 파일 찾기
 
-첫 화면의 **파일 검색**은 PC 전체 색인에서 파일과 폴더 이름을 찾습니다. 왼쪽에는 Windows 아이콘과 이름, 오른쪽에는 전체 경로가 표시됩니다. 경로 옆의 **경로 복사** 버튼으로 전체 경로를 복사할 수 있습니다. 검색어를 모두 지우면 결과도 비워집니다.
+첫 화면의 **파일 검색**은 Everything 색인에서 파일과 폴더 이름을 찾습니다. 이름을 한 번 누르거나 Tab으로 선택한 뒤 Enter를 누르면 폴더는 탐색기에서 열리고 파일은 Windows의 기본 연결 방식으로 열립니다. 오른쪽에는 전체 경로와 **경로 복사** 버튼이 있습니다.
 
-- Windows x64용 공식 **Everything SDK 3.0.1.12**를 포함합니다. **Everything 1.5**가 실행 중이면 기본 인스턴스와 `1.5a` 인스턴스에 연결해 Everything이 색인한 위치 전체를 검색합니다. Everything 자체는 별도로 설치·실행해야 합니다.
-- Everything이 없거나 연결할 수 없으면 **폴더 검색**으로 전환합니다. 로컬 고정식·이동식 드라이브의 루트에서 직접 탐색합니다. 화면에 실제 탐색 범위와 한도 도달 여부를 표시합니다. 결과 200개, 탐색 항목 50,000개 또는 탐색 3초 한도에 도달하면 불완전한 결과임을 표시합니다.
+- Windows x64용 공식 **Everything SDK 3.0.1.12**를 포함합니다. 앱이 시작되면 **Everything 1.5**에 연결합니다. Windows에 등록된 1.5 설치본은 필요할 때 백그라운드로 시작합니다. 포터블 버전은 직접 실행하세요.
+- 연결이나 색인을 기다리는 동안에도 이름을 입력할 수 있습니다. 준비되면 마지막 검색어로 최대 200개 경로를 표시합니다.
 - 검색은 파일명 일부의 문자 그대로 일치입니다. 경로·와일드카드·Everything 검색 연산자는 입력하지 않습니다. 파일 묶음 추천의 정확도와 파일 검색 속도는 별도로 검증합니다.
 
 SDK 연동 방식과 측정 방법은 [검색 연동 설계](docs/search.md)에 정리합니다.
@@ -104,7 +104,7 @@ npx.cmd --yes electron@45.3.3 ./desktop
 | [engine.py](engine.py) · [terms.json](terms.json) · [readers.py](readers.py) | 파일명과 한·영 용어를 비교하고 필요한 문서만 일부 읽어 그룹을 추천합니다. |
 | [feedback.py](feedback.py) · [constraints.py](constraints.py) · [storage.py](storage.py) | 사용자가 정한 소속과 파일 관계를 저장하고 파일 이동과 복원을 처리합니다. |
 | [browser_extension/](browser_extension/) · [capture_host.py](capture_host.py) | 선택적으로 Edge·Chrome에서 받은 파일과 다운로드 페이지를 연결합니다. |
-| [file_search.py](file_search.py) · [vendor/](vendor/) | 공식 Everything SDK 검색과 설치가 필요 없는 제한된 폴더 검색을 제공합니다. |
+| [file_search.py](file_search.py) · [vendor/](vendor/) | Everything SDK 연결과 실시간 파일명 검색을 담당합니다. |
 | [test_pipeline.py](test_pipeline.py) · [test_desktop.py](test_desktop.py) | 예제 파일로 분류 결과, 그룹 편집, 파일 이동과 복원을 검증합니다. |
 
 추천 점수의 기준과 지원 문서 형식은 [분석 설계](docs/analysis.md)에, 작업 브랜치·테스트 명령·PR 작성 예시는 [기여 가이드](CONTRIBUTING.md)에 있습니다.
