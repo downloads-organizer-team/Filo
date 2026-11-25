@@ -137,8 +137,8 @@ class CampusTests(unittest.TestCase):
         from models import DownloadContext
         self.root=storage.HOME/"제목";self.root.mkdir()
         course=["chap.0 강의소개.pdf","chap.1 DevOps.pdf","chap.2 Git.pdf","practice1.md"]
-        other=["CHAP.1 기업재무.pdf","CHAP.2 재무설계.pdf"]
-        for name in course+other:(self.root/name).touch()
+        other=["CHAP.1 기업재무.pdf","CHAP.2 재무설계.pdf","CHAP.3 재무제표.pdf"]
+        for name in course+other:(self.root/name).write_bytes(name.encode())
         s,files=self.run_app()
         self.assertLess(s.primary[files[course[1]].index][files[other[0]].index],60)
         self.assertEqual(files[course[0]].sequence,"chap.0")
@@ -170,9 +170,9 @@ class CampusTests(unittest.TestCase):
         self.assertNotEqual(files[other[0]].group.title,title)
         self.assertFalse(s.rules.rules.pins)
         for name in course:(self.root/name).unlink()
-        for i in (3,4):
+        for i in (3,4,5):
             name=f"chap.{i} 수업자료.pdf"
-            (self.root/name).touch()
+            (self.root/name).write_bytes(name.encode())
             s,files=self.run_app()
             feedback.record_download(files[name].uid,DownloadContext("https://lms.example/courses/111/files","lms.example"))
         s,files=self.run_app()
@@ -211,7 +211,7 @@ class CampusTests(unittest.TestCase):
         write_slide_fixture(first,[(None,3000,[["도시","의"],["리듬"]]),
                                    (None,1600,[["도시대학교"],["교수 김선우"]])])
         for week,session in [(1,2),(1,3),(2,1),(2,2),(2,3)]:
-            (self.root/f"{week}주{session}차시내용.pptx").touch()
+            (self.root/f"{week}주{session}차시내용.pptx").write_bytes(bytes([week,session]))
         for f in self.run_app()[0].files:
             feedback.record_download(f.uid,DownloadContext(f"https://lms.example/courses/731/files/{f.index}","lms.example"))
         # No membership refinement or prior course names; only the cover switch is on.
@@ -246,10 +246,10 @@ class CampusTests(unittest.TestCase):
 
     def test_number_only_and_unseen_topic(self):
         self.root=Path(self.tmp.name)/"작업";self.root.mkdir()
-        for name in ("01.pdf","02.pdf","03.txt"):(self.root/name).touch()
+        for name in ("01.pdf","02.pdf","03.txt"):(self.root/name).write_bytes(name.encode())
         with patch("refinement.read") as rd:
             s,_=self.run_app(True);self.assertFalse(s.groups);rd.assert_not_called()
-        for name in ("안개꽃_시안.docx","안개꽃_견적.xlsx","안개꽃_사진.jpg"):(self.root/name).touch()
+        for name in ("안개꽃_시안.docx","안개꽃_견적.xlsx","안개꽃_사진.jpg"):(self.root/name).write_bytes(name.encode())
         s,fs=self.run_app()
         self.assertEqual(len(s.groups),1)
         self.assertEqual({f.name.split("_")[0] for f in s.groups[0].members},{"안개꽃"})
@@ -260,7 +260,7 @@ class CampusTests(unittest.TestCase):
         self.assertEqual(fs["DNS_실습.pptx"].group.title,"통신 수업")
         feedback.assign(s,[fs["01.txt"]],fs["DNS_실습.pptx"].group);s,fs=self.run_app()
         self.assertEqual(fs["01.txt"].group.title,"통신 수업")
-        feedback.split(s,fs["01.txt"].group,[fs["01.txt"],fs["DNS_실습.pptx"]],"별도 과제")
+        feedback.split(s,fs["01.txt"].group,[fs["01.txt"],fs["DNS_실습.pptx"],fs["wireshark_lab.zip"]],"별도 과제")
         s,fs=self.run_app();self.assertEqual(fs["01.txt"].group.title,"별도 과제")
         self.assertNotEqual(fs["01.txt"].group,fs["02_TCP_IP.pdf"].group)
         feedback.merge(s,fs["01.txt"].group,fs["02_TCP_IP.pdf"].group)
@@ -289,13 +289,14 @@ class CampusTests(unittest.TestCase):
         s,f=self.run_app()
         self.assertIs(f["DNS_실습.pptx"].group,f["단백질_실습.pptx"].group)
         self.assertIsNot(f["DNS_실습.pptx"].group,f["02_TCP_IP.pdf"].group)
-        feedback.create(s,[f[mixed.name]],"융합 과제")
+        feedback.create(s,[f[mixed.name],f["01.txt"],f["IMG_2031.jpg"]],"융합 과제")
         s,f=self.run_app(True)
         self.assertEqual(f[mixed.name].group.title,"융합 과제")
         self.assertNotIn(f[mixed.name].index,s.attempted)
     def test_cannot_link_retains_two_confident_anchors(self):
         s,f=self.run_app(True);a,b=f["DNS_실습.pptx"],f["02_TCP_IP.pdf"]
-        feedback.save_edit(s,relation=(a,b,"cannot"));s,f=self.run_app(True)
+        feedback.save_edit(s,relation=(a,b,"cannot"))
+        s=engine.discover_relations(self.root,deep=True);f={x.name:x for x in s.files}
         self.assertIsNotNone(f[a.name].group);self.assertIsNotNone(f[b.name].group)
         self.assertIsNot(f[a.name].group,f[b.name].group)
     def test_context_and_move_undo(self):
@@ -313,7 +314,7 @@ class CampusTests(unittest.TestCase):
         self.root=storage.HOME/"강의";self.root.mkdir()
         crypto={"01_암호학개론.pdf","02_스트림암호.pdf","03_블록암호와_AES.pptx"}
         nutrition={"식생활_영양_지침.pdf","2020_영양과건강_식품구성.pdf","2025_영양섭취기준.pdf"}
-        for name in crypto|nutrition:(self.root/name).touch()
+        for name in crypto|nutrition:(self.root/name).write_bytes(name.encode())
         s,f=self.run_app()
         self.assertEqual({frozenset(x.name for x in g.members) for g in s.groups},{frozenset(crypto),frozenset(nutrition)})
         p=self.root/"2025학년도_네트워크_과제.pdf";p.touch()
@@ -341,7 +342,7 @@ class CampusTests(unittest.TestCase):
         self.root=storage.HOME/"강의";self.root.mkdir()
         names=("lec01_introduction.pdf","lec02_history.pdf","lec03_discussion.pdf",
                "week01_introduction.pdf","week02_history.pdf","week03_discussion.pdf")
-        for name in names:(self.root/name).touch()
+        for name in names:(self.root/name).write_bytes(name.encode())
         s,f=self.run_app()
         for i,name in enumerate(names):
             course=23 if i<3 else 42
@@ -359,7 +360,7 @@ class CampusTests(unittest.TestCase):
         self.assertEqual(after.revision,s.revision)
         self.assertFalse(after.relations or after.pins or after.names)
         feedback.save_edit(s,relation=(a,b,"must"),allow_cross_course=True)
-        s,f=self.run_app(True);a,b=f[a.name],f[b.name]
+        s=engine.discover_relations(self.root,deep=True);f={x.name:x for x in s.files};a,b=f[a.name],f[b.name]
         self.assertIs(a.group,b.group)
         self.assertEqual((a.group.title_kind,a.group.title),("conflict","과목명 확인 필요"))
         self.assertIsNone(a.confidence)
@@ -377,8 +378,8 @@ class CampusTests(unittest.TestCase):
         from models import DownloadContext
         from course_titles import find_title
         self.root=storage.HOME/"download";self.root.mkdir()
-        names=("week01_고지도.pdf","week02_지명.pptx")
-        for name in names:(self.root/name).write_bytes(b"example")
+        names=("week01_고지도.pdf","week02_지명.pptx","week03_지도.pdf")
+        for name in names:(self.root/name).write_bytes(name.encode())
         s,files=self.run_app()
         a=files[names[0]]
         # Existing installations use five fields of metadata plus the UID.
@@ -411,7 +412,7 @@ class CampusTests(unittest.TestCase):
         project={"별빛전시_포스터.png","별빛전시_견적.xlsx","별빛전시_공간배치도.dwg"}
         trip={"제주여행_항공권.pdf","제주여행_숙소예약.txt","제주여행_일정표.xlsx"}
         noise={"01.pdf","IMG_0173.jpg","보고서_우박.txt","보고서_종이컵.png","보고서_다람쥐.zip"}
-        for name in project|trip|noise:(self.root/name).touch()
+        for name in project|trip|noise:(self.root/name).write_bytes(name.encode())
         study,files=self.run_app(True)
         self.assertEqual({g.title:frozenset(f.name for f in g.members) for g in study.groups},
                          {"별빛전시":project,"제주여행":trip})
@@ -424,7 +425,7 @@ class CampusTests(unittest.TestCase):
         from course_source import hint
         self.root=storage.HOME/"외부 강좌";self.root.mkdir()
         names=("01.pdf","02.txt","03.pptx","04.pdf","05.txt","06.pptx")
-        for name in names:(self.root/name).touch()
+        for name in names:(self.root/name).write_bytes(name.encode())
         for u,expected in [("https://campus.example.edu/courses/83/files/5","83"),
                            ("https://campus.example.edu/course/view.php?id=72","72")]:
             self.assertEqual(hint(u)[1],expected)
@@ -434,7 +435,7 @@ class CampusTests(unittest.TestCase):
         with patch.object(storage,"downloads_folder",return_value=self.root):
             for i,name in enumerate(names):
                 course="도시 경관 읽기" if i<3 else "소리의 역사"
-                msg=dict(type="download",path=str(self.root/name),size=0,endTime=now,
+                msg=dict(type="download",path=str(self.root/name),size=(self.root/name).stat().st_size,endTime=now,
                          pageOrigin=origin,pageTitle="자료실",courseName=course,courseId="")
                 if i==0:
                     self.assertTrue(capture(msg)["skip"])

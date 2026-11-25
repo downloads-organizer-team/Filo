@@ -1,17 +1,19 @@
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from collections import Counter, defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 from zipfile import ZipFile
 from uuid import UUID, uuid4
 from urllib.parse import quote
 import ctypes
-import hashlib
 import json
 import os
 import re
 import stat
 from models import File, HistoryEvent
 from scanner import check_directory, file_uid
+from eligibility import MIN_UNIQUE, check_source, checksum, minimum_reason
 
 HOME=Path(os.environ["MOA_HOME"]) if os.environ.get("MOA_HOME") else Path(os.environ.get("LOCALAPPDATA",str(Path.home())))/"MoaFileReview"
 
@@ -113,9 +115,6 @@ def sample():
             stamp=datetime(2026,3,day,10).timestamp();os.utime(p,(stamp,stamp))
     return root
 
-def checksum(p):
-    with open(p,"rb") as f:return hashlib.file_digest(f,"sha256").hexdigest()
-
 def save(p,batch):
     temp=p.with_name(p.name+"."+uuid4().hex+".tmp")
     try:
@@ -143,6 +142,7 @@ class FolderMove:
     destination: Path | None = None
     mode: str = "new"
     destination_id: tuple[int,int] | None = None
+    digest: str = ""
 
 
 def folder_name(title):
@@ -194,13 +194,19 @@ def plan_group_folders(study, selected=None, destination=None, mode="new", *, fi
         parent=reuse or destination
         move_mode="existing" if reuse or mode=="existing" else "new"
         folder_id=None
+        parent_error=""
         if move_mode=="existing":
-            info=check_directory(parent).stat()
-            folder_id=(info.st_dev,info.st_ino)
+            try:
+                info=check_directory(parent).stat()
+                folder_id=(info.st_dev,info.st_ino)
+            except OSError as error:
+                parent_error=str(error)
         for file in sorted(members, key=lambda f: str(f.path).casefold()):
             target = parent / name / file.name if move_mode=="new" else parent / file.name
             skip = ""
             try:
+                if parent_error or file.hold_reason:raise OSError(parent_error or file.hold_reason)
+                check_source(file)
                 check_group_paths(parent, file.path, target, roots, move_mode)
                 if target == file.path:
                     skip = "이미 정리됨"
@@ -211,73 +217,174 @@ def plan_group_folders(study, selected=None, destination=None, mode="new", *, fi
             except (OSError, RuntimeError) as error:
                 skip = str(error)
             plan.append(FolderMove(file, target, skip, roots, parent, move_mode, folder_id))
-    return plan
+    return apply_minimum(plan)
+
+
+def apply_minimum(plan):
+    counts = Counter(p.target.parent for p in plan if p.mode == "new" and not p.skip)
+    return [replace(p,skip=minimum_reason(counts[p.target.parent]))
+            if p.mode=="new" and not p.skip and counts[p.target.parent]<MIN_UNIQUE else p for p in plan]
+
+
+def confirm_plan(plan):
+    """Bind the confirmation to the bytes on disk and recheck the folder threshold."""
+    result = []
+    seen = set()
+    reserved = set()
+    for item in plan:
+        if not item.skip:
+            try:
+                if item.destination:
+                    check_group_paths(item.destination,item.file.path,item.target,item.roots,item.mode)
+                if os.path.lexists(item.target) or item.target in reserved:
+                    raise OSError("목적지에 같은 이름이 있습니다.")
+                check_source(item.file)
+                digest = checksum(item.file.path)
+                check_source(item.file)
+                if item.file.digest and digest != item.file.digest:
+                    raise OSError("분석 후 파일 내용이 바뀌었습니다.")
+                if digest in seen:
+                    raise OSError("동일 내용의 사본")
+                seen.add(digest)
+                reserved.add(item.target)
+                item = replace(item,digest=digest)
+            except OSError as error:
+                item = replace(item,skip=str(error))
+        result.append(item)
+    return apply_minimum(result)
 
 
 def move(items,dest):
-    return move_files((FolderMove(f,Path(dest)/f.name) for f in items))
+    return move_files(FolderMove(f,Path(dest)/f.name,mode="existing") for f in items)
+
+
+@contextmanager
+def history_lock():
+    # The OS releases the lock on process exit, including a crash during a rename.
+    directory = HOME / "History"
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / ".lock").open("a+b") as stream:
+        stream.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(stream, fcntl.LOCK_EX)
+        try:
+            yield directory
+        finally:
+            stream.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream, fcntl.LOCK_UN)
+
+
+def file_identity(directory):
+    info = check_directory(directory).stat()
+    return [info.st_dev,info.st_ino]
+
+
+def validate_destination(row, created=None):
+    if not row.get("group_root"):
+        return
+    root = Path(row["group_root"])
+    src, dst = Path(row["src"]), Path(row["dst"])
+    check_group_paths(root,src,dst,row.get("source_roots"),row.get("destination_mode","new"))
+    expected = created or row.get("destination_id")
+    if expected and file_identity(dst.parent) != expected:
+        raise OSError("대상 폴더가 바뀌었습니다.")
 
 
 def move_files(plan, group_root=None):
-    history=HOME/"History";history.mkdir(parents=True,exist_ok=True)
-    log=history/(datetime.now().strftime("%Y%m%d-%H%M%S-%f")+"-"+uuid4().hex[:6]+".json")
-    rows=[];report=[];reserved=set()
+    with history_lock() as directory:
+        recover_locked(directory)
+        return execute_moves(list(plan), group_root, directory)
+
+
+def execute_moves(plan, group_root, directory):
+    rows = []
+    reserved = set()
+    seen = set()
     for item in plan:
-        f,target=item.file,item.target
-        if item.skip:
-            report.append(f"건너뜀   {f.name}   ·   {item.skip}")
-            continue
+        f, target = item.file, item.target
+        root = item.destination or group_root
+        row = dict(src=str(f.path),dst=str(target),uid=f.uid,size=f.size,mtime_ns=f.mtime_ns,
+                   destination_mode=item.mode,status="planned",sha="")
+        rows.append(row)
+        if root:
+            row.update(group_root=str(root),source_roots=list(map(str,item.roots or [root])))
+        if item.destination_id:
+            row["destination_id"] = list(item.destination_id)
         try:
-            destination=item.destination or group_root
-            roots=item.roots or ((Path(group_root),) if group_root is not None else ())
-            if destination is not None:check_group_paths(destination,f.path,target,roots,item.mode)
-            if item.destination_id:
-                info=destination.stat()
-                if item.destination_id!=(info.st_dev,info.st_ino):raise OSError("미리보기 후 대상 폴더가 바뀌었습니다.")
-            st=f.path.lstat()
-            if (stat.S_ISLNK(st.st_mode) or getattr(st,"st_file_attributes",0)&stat.FILE_ATTRIBUTE_REPARSE_POINT
-                    or file_uid(f.path,st)!=f.uid):raise OSError("분석 후 파일 변경")
-            if (st.st_size,st.st_mtime_ns)!=(f.size,f.mtime_ns):raise OSError("분석 후 파일 변경")
-            if os.path.lexists(target) or target in reserved:raise OSError("같은 이름 또는 같은 위치")
-            row:dict[str,str|int|list[str]]=dict(src=str(f.path),dst=str(target),sha=checksum(f.path),status="planned",
-                     uid=f.uid,size=f.size,mtime_ns=f.mtime_ns)
-            if destination is not None:
-                row.update(group_root=str(destination),source_roots=list(map(str,roots)),destination_mode=item.mode)
-                if item.destination_id:row["destination_id"]=list(item.destination_id)
-            rows.append(row)
+            if item.skip:
+                raise OSError(item.skip)
+            validate_destination(row)
+            if item.mode == "new" and os.path.lexists(target.parent):
+                raise OSError("미리보기 후 새 폴더 위치가 사용 중입니다.")
+            check_source(f)
+            if os.path.lexists(target) or target in reserved:
+                raise OSError("목적지에 같은 이름이 있습니다.")
+            row["sha"] = checksum(f.path)
+            if (item.digest or f.digest) and row["sha"] != (item.digest or f.digest):
+                raise OSError("미리보기 후 파일 내용이 바뀌었습니다.")
+            if row["sha"] in seen:
+                raise OSError("동일 내용의 사본")
+            seen.add(row["sha"])
             reserved.add(target)
-        except (OSError,RuntimeError) as ex:report.append("건너뜀   "+f.name+"   ·   "+str(ex))
-    if not rows:return report
+        except (OSError, RuntimeError) as error:
+            row.update(status="skipped",reason=str(error))
+
+    grouped = new_folder_rows(rows)
+    for members in grouped.values():
+        ready = [r for r in members if r["status"]=="planned"]
+        if len(ready) < MIN_UNIQUE:
+            for r in ready:
+                r.update(status="skipped",reason=minimum_reason(len(ready)))
+
+    if not rows:
+        return []
+    log = directory / (datetime.now().strftime("%Y%m%d-%H%M%S-%f")+"-"+uuid4().hex[:6]+".json")
+    rows[0]["transaction"] = "moving"
     save(log,rows)
-    created={}
-    for r in rows:
-        src=Path(r["src"]);dst=Path(r["dst"])
+    created = {}
+    for row,item in zip(rows,plan):
+        if row["status"]!="planned":
+            continue
+        src, dst = item.file.path, item.target
         try:
-            if r.get("group_root"):
-                destination=Path(r["group_root"])
-                check_group_paths(destination,src,dst,r.get("source_roots"),r.get("destination_mode","new"))
-                if r.get("destination_mode","new")=="new":
-                    if dst.parent not in created:
-                        dst.parent.mkdir()
-                        info=dst.parent.stat()
-                        r["created_dir"]=[info.st_dev,info.st_ino]
-                        created[dst.parent]=r["created_dir"]
-                        save(log,rows)
-                expected=created.get(dst.parent) or r.get("destination_id")
-                if expected:
-                    info=dst.parent.stat()
-                    if expected!=[info.st_dev,info.st_ino]:raise OSError("대상 폴더가 바뀌었습니다.")
-                check_group_paths(destination,src,dst,r.get("source_roots"),r.get("destination_mode","new"))
-            st=src.lstat()
-            if ((st.st_size,st.st_mtime_ns)!=(r["size"],r["mtime_ns"])
-                    or file_uid(src,st)!=r["uid"] or checksum(src)!=r["sha"]):
-                raise OSError("분석 후 파일 변경")
-            relocate(src,dst);r["status"]="moved"
-            report.append("이동 완료   "+str(dst))
-        except (OSError,RuntimeError) as ex:r["status"]="failed";report.append("건너뜀   "+src.name+"   ·   "+str(ex))
+            validate_destination(row,created.get(dst.parent))
+            check_source(item.file)
+            if checksum(src)!=row["sha"]:
+                raise OSError("미리보기 후 파일 내용이 바뀌었습니다.")
+            if item.mode=="new" and dst.parent not in created:
+                dst.parent.mkdir()
+                row["created_dir"] = created[dst.parent] = file_identity(dst.parent)
+            if dst.parent in created:
+                row["destination_id"] = created[dst.parent]
+            validate_destination(row)
+            row["status"] = "moving"
+            save(log,rows)
+            relocate(src,dst)
+            row["status"] = "moved"
+            row["dst_uid"] = file_uid(dst,dst.lstat())
+        except (OSError,RuntimeError) as error:
+            if row["status"]=="moving":
+                reconcile(row)
+            if row["status"]!="moved":
+                row.update(status="skipped",reason=str(error))
         save(log,rows)
-    remove_empty_group_dirs(rows)
-    return report
+    finish_move(log,rows)
+    return [result_line(r) for r in rows]
+
+
+def new_folder_rows(rows):
+    groups = defaultdict(list)
+    for row in rows:
+        if row.get("destination_mode")=="new":
+            groups[Path(row["dst"]).parent].append(row)
+    return groups
 
 
 def remove_empty_group_dirs(rows):
@@ -285,45 +392,201 @@ def remove_empty_group_dirs(rows):
         if not row.get("created_dir"):continue
         directory=Path(row["dst"]).parent
         try:
-            info=directory.lstat()
-            if (directory.parent==Path(row["group_root"]) and directory.resolve()==directory
-                    and info.st_ino and row["created_dir"]==[info.st_dev,info.st_ino]):
+            if (directory.parent==Path(row["group_root"]) and row["created_dir"][1]
+                    and file_identity(directory)==row["created_dir"]):
                 directory.rmdir()
         except (OSError,RuntimeError):
-            pass  # A populated, replaced or unavailable folder must be retained.
+            pass  # Retain populated, replaced, or unavailable folders.
+
+
+def matching(path, row, uid=None):
+    info=path.lstat()
+    return (stat.S_ISREG(info.st_mode)
+            and not getattr(info,"st_file_attributes",0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            and (not uid or file_uid(path,info)==uid)
+            and checksum(path)==row["sha"])
+
+
+def reconcile(row):
+    """Inspect only operations with a persisted intent and an unknown outcome."""
+    src, dst = Path(row["src"]), Path(row["dst"])
+    if row["status"]=="moving":
+        try:
+            arrived = os.path.lexists(dst) and (not os.path.lexists(src)
+                      or file_uid(dst,dst.lstat())==row["uid"])
+        except OSError:
+            arrived = False
+        if arrived:
+            row.update(status="moved",reason="중단된 이동 · 현재 파일 확인 필요")
+        else:
+            row.update(status="skipped",reason="이동 중단 · 두 경로를 확인하세요.")
+    elif row["status"]=="restoring":
+        try:
+            if not os.path.lexists(dst) and matching(src,row):
+                row.update(status="undone",reason="")
+                return
+        except OSError:
+            pass
+        row.update(status="moved",reason="복원 중단 · 재시도 가능")
+
 
 def pending(row):
-    return row["status"]=="moved" or (row["status"]=="planned" and not Path(row["src"]).exists() and Path(row["dst"]).is_file())
+    if row["status"] in ("moved","restoring"):
+        return True
+    # Older versions persisted 'planned' just before moving a file.
+    return (row["status"]=="planned" and not os.path.lexists(row["src"])
+            and os.path.lexists(row["dst"]))
+
+
+def restore_reason(row):
+    try:
+        src, dst = Path(row["src"]), Path(row["dst"])
+        validate_destination(row)
+        check_directory(dst.parent)
+        if os.path.lexists(src):
+            raise OSError("원래 위치가 사용 중입니다.")
+        if not os.path.lexists(dst):
+            raise OSError("이동한 파일이 사라졌습니다.")
+        if not matching(dst,row,row.get("dst_uid")):
+            raise OSError("이동한 파일이 변경되었습니다.")
+        return ""
+    except (OSError,RuntimeError) as error:
+        return str(error)
+
+
+def restore_row(log,rows,row):
+    reason = restore_reason(row)
+    if reason:
+        row.update(status="moved",reason=reason)
+    else:
+        src, dst = Path(row["src"]), Path(row["dst"])
+        row.update(status="restoring",reason="")
+        save(log,rows)
+        try:
+            src.parent.mkdir(parents=True,exist_ok=True)
+            check_directory(src.parent)
+            reason = restore_reason(row)
+            if reason:
+                raise OSError(reason)
+            relocate(dst,src)
+            row.update(status="undone",reason="")
+        except (OSError,RuntimeError) as error:
+            reconcile(row)
+            row["reason"]=str(error)
+    save(log,rows)
+
+
+def finish_move(log,rows):
+    for row in rows:
+        reconcile(row)
+        if row["status"]=="planned":
+            row.update(status="skipped",reason="처리 전에 이동이 중단되었습니다.")
+    for members in new_folder_rows(rows).values():
+        moved = [r for r in members if r["status"]=="moved"]
+        if 0 < len(moved) < MIN_UNIQUE:
+            for row in reversed(moved):
+                restore_row(log,rows,row)
+                if row["status"]=="undone":
+                    row["reason"]=minimum_reason(len(moved))+" · 원위치로 복원"
+    remove_empty_group_dirs(rows)
+    rows[0]["transaction"]="finished"
+    save(log,rows)
+
+
+def result_line(row, undoing=False):
+    state = row["status"]
+    if undoing or state=="undone":
+        label = "복원 완료" if state=="undone" else "복원 보류"
+        source,target = row["dst"],row["src"]
+    else:
+        label = "건너뜀"
+        if state=="moved":
+            label = "복원 확인 필요" if row.get("reason") else "이동 완료"
+        source,target = row["src"],row["dst"]
+    reason = " · "+row["reason"] if row.get("reason") else ""
+    return f"{label}   {source} → {target}{reason}"
+
+
+def read_history(path):
+    rows=json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(rows,list) or any(
+            not isinstance(r,dict) or not all(isinstance(r.get(k),str) for k in ("status","src","dst","sha"))
+            for r in rows):
+        raise ValueError("이력 파일의 형식을 확인할 수 없습니다.")
+    return rows
+
+
+def recover_locked(directory):
+    for path in directory.glob("*.json"):
+        try:
+            rows=read_history(path)
+        except (OSError,ValueError):
+            continue
+        if rows and rows[0].get("transaction")=="moving":
+            finish_move(path,rows)
+        elif any(r["status"]=="restoring" for r in rows):
+            for r in rows:
+                reconcile(r)
+            remove_empty_group_dirs(rows)
+            save(path,rows)
+
+
+def recover_interrupted():
+    if (HOME/"History").is_dir():
+        with history_lock() as directory:
+            recover_locked(directory)
+
+
+def batches():
+    recover_interrupted()
+    for path in sorted((HOME/"History").glob("*.json"),reverse=True):
+        try:
+            rows=read_history(path)
+        except (OSError,ValueError):
+            rows=None
+        yield path,rows
+
+
+def history_batch(batch_id):
+    for path,rows in batches():
+        if path.stem==batch_id:
+            if rows is None:
+                raise ValueError("선택한 이력 파일을 읽을 수 없습니다.")
+            return path,rows
+    raise ValueError("선택한 정리 기록을 찾을 수 없습니다.")
+
 
 def latest():
-    for p in sorted((HOME/"History").glob("*.json"),reverse=True):
-        rows=json.loads(p.read_text(encoding="utf-8"))
-        if any(map(pending,rows)):return p,rows
-    return None,[]
+    return next(((p,rows) for p,rows in batches() if rows and any(map(pending,rows))), (None,[]))
+
 
 def recent_history() -> list[HistoryEvent]:
     result=[]
-    for path in sorted((HOME/"History").glob("*.json"),reverse=True)[:10]:
-        rows=json.loads(path.read_text(encoding="utf-8"))
-        stamp=datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y.%m.%d %H:%M")
-        result.append(HistoryEvent(time=stamp,moved=sum(r["status"] in {"moved","undone"} for r in rows),
+    for path,rows in batches():
+        readable=rows is not None
+        rows=rows or []
+        try:
+            stamp=datetime.strptime(path.stem[:15],"%Y%m%d-%H%M%S")
+        except ValueError:
+            stamp=datetime.fromtimestamp(path.stat().st_mtime)
+        result.append(HistoryEvent(id=path.stem,time=stamp.strftime("%Y.%m.%d %H:%M:%S"),readable=readable,
+                                   moved=sum(pending(r) or r["status"]=="undone" for r in rows),
                                    undone=sum(r["status"]=="undone" for r in rows),
                                    pending=sum(pending(r) for r in rows),
                                    files=[Path(r["src"]).name for r in rows[:8]]))
     return result
 
-def undo(path):
-    rows=json.loads(path.read_text(encoding="utf-8"));report=[]
-    for r in reversed(rows):
-        if not pending(r):continue
-        src,dst=Path(r["src"]),Path(r["dst"])
-        try:
-            if r.get("group_root"):
-                check_group_paths(Path(r["group_root"]),src,dst,r.get("source_roots"),r.get("destination_mode","new"))
-            if src.exists():raise OSError("원래 위치가 사용 중입니다.")
-            if not dst.is_file() or checksum(dst)!=r["sha"]:raise OSError("이동 후 파일이 바뀌었거나 사라졌습니다.")
-            src.parent.mkdir(parents=True,exist_ok=True);relocate(dst,src);r["status"]="undone";report.append("복원 완료   "+src.name)
-        except (OSError,RuntimeError) as ex:report.append("복원 보류   "+src.name+"   ·   "+str(ex))
-        save(path,rows)
-    remove_empty_group_dirs(rows)
-    return report
+
+def undo(path, indices=None):
+    with history_lock() as directory:
+        recover_locked(directory)
+        rows=read_history(path)
+        report=[]
+        for i in reversed(range(len(rows))):
+            row=rows[i]
+            if not pending(row) or indices is not None and i not in indices:
+                continue
+            restore_row(path,rows,row)
+            report.append(result_line(row,undoing=True))
+        remove_empty_group_dirs(rows)
+        return report

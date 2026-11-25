@@ -14,22 +14,20 @@ const palettes=[
 ];
 const colors=g=>{const p=palettes[Math.max(0,data?.groups.indexOf(g)??0)%palettes.length];return ["wash","rim","back","front","fold","ink","dot"].map((k,i)=>"--"+k+":"+p[i]).join(";");};
 const titles={search:"파일 검색",review:"파일 검토",matrix:"유사도 행렬",flow:"분석 과정"};
-let data=null,groups=new Map(),files=new Map(),view="search",scope=null,query="",groupQuery="",page=0;
+let data=null,groups=new Map(),files=new Map(),view="search",scope=null,query="",groupQuery="";
 let selected=new Set(),busy=false,scanBusy=false,renderId=0,toastTimer,dialogAction=null;
 let mxRow=0,mxCol=0,pair=null,options={recursive:false,deep:true,covers:true,roots:[],folderMode:"reuse",minConfidence:0.7};
 let sourceDraft=null,searchVersion=0,liveVersion=0,searchTimer,retryOnReturn=false;
 let activeId=null,detailInfo=null,detailVersion=0,detailOpen=false,detailTab="evidence",relatedRows=null,relatedBusy=false,relatedError="";
 const compactDetails=window.matchMedia("(max-width:1199px)");
-const PAGE_SIZE=100;
+const expanded = new Set();
+let folderBranches = new Map(), originalLayout = new Map(), layout = new Map(), layoutKey = "", layoutReady = false;
 function bytes(n){if(n<1024)return n+" B";if(n<1048576)return Math.round(n/1024)+" KB";return (n/1048576).toFixed(1)+" MB";}
 function fileBadge(ext){
   const kind=ext==="pdf"?"pdf":/^(pptx?|zip|7z|rar)$/.test(ext)?"slides":/^(xlsx?|csv|tsv)$/.test(ext)?"sheet":/^(docx?|hwp[x]?|md|txt)$/.test(ext)?"word":"";
   return '<span class="doctype '+kind+'" aria-hidden="true">'+esc((ext||"FILE").toUpperCase().slice(0,4))+'</span>';
 }
-function chip(f){
-  const g=groups.get(f.group);
-  return '<button class="group-chip" data-scope="'+esc(g?.id||"hold")+'" style="'+(g?colors(g):"")+'"><span class="dot"></span><span class="ellipsis">'+esc(g?.title||"미분류")+'</span></button>';
-}
+
 function toast(text){clearTimeout(toastTimer);$("#toast").textContent=text;$("#toast").hidden=false;toastTimer=setTimeout(()=>$("#toast").hidden=true,3200);}
 function status(text,canCancel=false){const el=$("#status");el.hidden=!text;el.innerHTML=esc(text)+(canCancel?'<button data-action="cancel">분석 취소</button>':"");}
 function setBusy(value){
@@ -48,12 +46,15 @@ function showDialog(title,description,body,footer="",action=null,wide=false){
 function close(){searchVersion++;if($("#dialog").open)$("#dialog").close();dialogAction=null;}
 function errorDialog(e){showDialog("작업을 확인해 주세요","",'<p class="muted">'+esc(e.message||String(e))+'</p>');}
 function setScope(id){
-  view="review";scope=id==="all"?null:id;query="";page=0;selected.clear();activeId=null;detailInfo=null;detailOpen=false;detailVersion++;render();
+  if(!data)return sourcesDialog();
+  view="review";scope=id==="all"?null:id;query="";
+  if(scope)expanded.add(folderBranches.get(scope)||scope);
+  render();
+  if(scope)document.querySelector('[data-tree="'+CSS.escape(folderBranches.get(scope)||scope)+'"]')?.scrollIntoView({block:"nearest"});
 }
-function scopeFiles(){return !data?[]:scope==="hold"?data.files.filter(f=>!f.group):scope?data.files.filter(f=>f.group===scope):data.files;}
 function visibleFiles(){
   const q=query.trim().toLocaleLowerCase();
-  return scopeFiles().filter(f=>!q||f.name.toLocaleLowerCase().includes(q));
+  return (data?.files||[]).filter(f=>!q||f.name.toLocaleLowerCase().includes(q));
 }
 async function scan(newOptions=options,openReview=true){
   if(busy)return;
@@ -63,7 +64,17 @@ async function scan(newOptions=options,openReview=true){
     groups=new Map(data.groups.map(g=>[g.id,g]));files=new Map(data.files.map(f=>[f.id,f]));
     if(scope && scope!=="hold"&&!groups.has(scope))scope=null;
     if(openReview&&view==="search")view="review";
-    selected.clear();activeId=null;detailInfo=null;detailVersion++;detailOpen=false;pair=null;mxRow=0;mxCol=0;page=0;status("");render();
+    originalLayout=new Map(data.layout.map(row=>[row.id,row]));
+    folderBranches=new Map();
+    const destinations=new Map();
+    for(const row of data.layout){
+      const gid=files.get(row.id).group,path=parentPath(row.target).toLowerCase();
+      if(!destinations.has(path))destinations.set(path,gid);
+      folderBranches.set(gid,destinations.get(path));
+    }
+    selected=new Set(data.layout.filter(row=>!row.skip).map(row=>row.id));
+    layoutKey="";expanded.clear();scope=null;
+    activeId=null;detailInfo=null;detailVersion++;detailOpen=false;pair=null;mxRow=0;mxCol=0;status("");render();
   } catch(e){status(e.message);if(!data)$("#content").innerHTML='<div class="panel empty">분석 폴더를 확인하거나 다른 폴더를 추가한 뒤 다시 분석하세요.</div>'; }
   finally{scanBusy=false;setBusy(false);renderSources();}
 }
@@ -178,7 +189,7 @@ function render(){
   $("#content").classList.toggle("advanced-content",view!=="review");
   const searching=view==="search";
   $("#search-home").hidden=!searching;$("#content").hidden=searching;
-  $(".review-bar").hidden=searching;$("#root-path").hidden=searching||!data;
+  $(".review-bar").hidden=view!=="review";$("#root-path").hidden=searching||!data;
   $('[data-action="scan"]').hidden=searching||!data;
   $("#setup-label").textContent=searching?"파일 정리하기":"위치 · 기준 변경";
   document.querySelectorAll('.rail-section,.group-search,#group-nav,.advanced').forEach(el=>el.hidden=searching);
@@ -188,59 +199,100 @@ function render(){
   else if(view==="matrix")matrix(generation).catch(errorDialog);
   else flow();
 }
-function editableIds(){return selected.size?[...selected]:activeId!==null?[activeId]:[];}
+function editableIds(){
+  const ids=visibleFiles().filter(f=>selected.has(f.id)).map(f=>f.id);
+  return ids.length?ids:activeId!==null?[activeId]:[];
+}
 function moveCandidates(){
-  const listed=view==="review"?visibleFiles():data?.files||[];
-  const ids=view==="review"?new Set(editableIds()):new Set();
-  return listed.filter(f=>f.group&&(!ids.size||ids.has(f.id)));
+  return visibleFiles().filter(f=>f.group&&selected.has(f.id));
 }
 function updateReviewBar(){
-  const eligible=moveCandidates();
-  $("#organize").disabled=busy||!eligible.length;
-  const label=view!=="review"?"전체 추천 묶음":selected.size?"체크한 파일":activeId!==null?"현재 선택한 파일":
-    query.trim()?"필터 결과":scope==="hold"?"미분류 파일":groups.get(scope)?.title||"전체 추천 묶음";
-  $("#review-count").textContent=label+" · 이동 대상 "+eligible.length+"개";
-  $("#review-hint").textContent=eligible.length?"미리보기에서 원래 경로와 이동할 폴더를 확인하세요.":
-    query.trim()&&!visibleFiles().length?"필터에 맞는 파일이 없습니다.":"미분류 파일은 묶음을 지정하거나 직접 이동할 수 있어요.";
+  const candidates=moveCandidates();
+  const ready=layoutReady;
+  const current=layout;
+  const eligible=candidates.filter(f=>current.has(f.id)&&!current.get(f.id).skip);
+  $("#organize").disabled=busy||!ready||!candidates.length;
+  $("#review-count").textContent=ready?"이동 대상 "+eligible.length+"개":"이동 경로 확인 중…";
+  const blocked=candidates.length-eligible.length;
+  $("#review-hint").textContent=!ready?"":blocked?"선택한 파일 중 "+blocked+"개 보류 · 폴더를 펼쳐 사유를 확인하세요.":
+    eligible.length?"미리보기에서 경로를 확인한 뒤 이동하세요.":"이동할 파일을 체크하세요.";
 }
 function review(){
-  const g=groups.get(scope),all=scopeFiles();
-  $("#content").innerHTML='<div class="review-workspace"><section class="file-pane" aria-label="파일 목록"><div class="file-pane-head"><div class="section-head"><div class="hrow"><h2>'+esc(g?.title||(scope==="hold"?"미분류":"전체 파일"))+'</h2><span class="head-count">'+all.length+'</span></div>'+(g?btn("groupRename","이름 변경","pencil-simple"):"")+'</div><p class="scope-note">'+esc(g?.note||(scope==="hold"?"묶음이 정해지지 않은 파일입니다. 선택해서 직접 분류할 수 있어요.":"왼쪽에서 묶음을 선택하거나, 파일을 눌러 추천 근거를 살펴보세요."))+'</p><label class="search">'+icon("magnifying-glass")+'<input id="search" type="search" value="'+esc(query)+'" placeholder="현재 목록에서 파일명 필터" aria-label="현재 목록에서 파일명 필터"><kbd>Ctrl K</kbd></label></div>'+
-    '<div id="selection-bar" class="selection-bar"><span id="selection-count">파일 선택</span><div class="selection-actions"><button class="btn" data-file-edit="assign">'+icon("folder-notch-open")+'다른 묶음</button><button class="btn" data-file-edit="unclassify">미분류로</button><button class="btn" data-file-edit="create">'+icon("plus")+'새 묶음</button>'+ib("groupMenu","dots-three","선택 파일 추가 편집")+'</div></div>'+
-    '<div class="table-scroll" tabindex="0" aria-label="파일 목록 스크롤"><table><thead><tr><th class="checkbox"><input id="all-check" type="checkbox" aria-label="필터 결과 전체 선택"></th><th class="name-col">파일명 · 원래 위치</th><th class="group-col">묶음</th><th class="score-col">신뢰도</th><th class="open-col"></th></tr></thead><tbody id="file-rows"></tbody></table><div id="empty" class="empty" hidden></div></div><div class="table-foot"><span id="row-summary"></span><span id="page-tools"></span></div></section>'+
-    '<button id="detail-scrim" data-action="closeDetail" aria-label="파일 목록으로 돌아가기" hidden></button><aside id="file-inspector" class="file-inspector" aria-label="선택한 파일 근거" tabindex="-1"><div class="inspector-heading"><h2>파일 근거</h2>'+btn("closeDetail","목록으로","arrow-left")+'</div><div id="inspector-body" class="inspector-body"><div class="inspector-empty">'+icon("file-magnifying-glass")+'<h3>파일의 연결을 살펴보세요</h3><p>목록에서 파일을 선택하면 원래 위치와 수정 시각, 추천 근거를 확인할 수 있어요.</p></div></div></aside></div>';
-  $("#search").oninput=e=>{
-    query=e.target.value;page=0;
-    const visible=new Set(visibleFiles().map(f=>f.id));
-    for(const id of selected)if(!visible.has(id))selected.delete(id);
-    if(activeId!==null&&!visible.has(activeId)){
-      activeId=null;detailInfo=null;detailOpen=false;detailVersion++;
-      $("#inspector-body").innerHTML='<p class="empty">파일을 누르면 추천 근거를 볼 수 있어요.</p>';syncInspector();
-    }
-    rows();
-  };rows();syncInspector();
-  if(activeId!==null&&files.has(activeId))detail(activeId,false).catch(errorDialog);
+  $("#content").innerHTML='<div class="review-workspace"><section class="file-pane" aria-label="정리 트리"><div class="file-pane-head"><label class="search">'+icon("magnifying-glass")+'<input id="search" type="search" placeholder="파일명 필터" aria-label="현재 목록에서 파일명 필터"><kbd>Ctrl K</kbd></label></div>'+
+    '<div class="selection-bar"><label><input id="all-check" type="checkbox"> 표시 파일 전체 선택</label><div class="selection-actions"><button class="btn" data-file-edit="assign">다른 묶음</button><button class="btn" data-file-edit="unclassify">미분류로</button><button class="btn" data-file-edit="create">새 묶음</button>'+ib("groupMenu","dots-three","선택 파일 추가 편집")+'</div></div>'+
+    '<div class="folder-tree" id="folder-tree"></div></section><button id="detail-scrim" data-action="closeDetail" aria-label="파일 목록으로 돌아가기" hidden></button><aside id="file-inspector" class="file-inspector" aria-label="파일 근거" tabindex="-1"><div class="inspector-heading"><h2>파일 근거</h2>'+btn("closeDetail","닫기","x")+'</div><div id="inspector-body" class="inspector-body"></div></aside></div>';
+  $("#search").value=query;
+  $("#search").oninput=e=>{query=e.target.value;rows();};
+  rows();syncInspector();
+  if(detailOpen&&activeId!==null)detail(activeId).catch(errorDialog);
+}
+function fileBranch(f){
+  const move=layout.get(f.id)||originalLayout.get(f.id);
+  const reason=!move?f.note:!selected.has(f.id)?"선택 제외":move.skip;
+  return '<div class="branch-file"><input type="checkbox" data-check="'+f.id+'" aria-label="'+esc(f.name)+' 선택" '+(selected.has(f.id)?"checked":"")+'>'+
+    '<div><button class="tree-name" data-file="'+f.id+'">'+fileBadge(f.ext)+esc(f.name)+'</button>'+
+    '<div class="tree-path"><span>원래 위치</span><code>'+esc(f.path)+'</code></div>'+
+    (move?'<div class="tree-path"><span>예상 경로</span><code>'+esc(move.target)+'</code></div>':"")+
+    (reason?'<small class="hold-reason">'+esc(reason)+'</small>':"")+'</div></div>';
+}
+function paintTree(){
+  if(!$("#folder-tree"))return;
+  const focused=document.activeElement?.dataset;
+  const visible=visibleFiles(), branches=new Map();
+  for(const f of visible){
+    const id=folderBranches.get(f.group)||"hold";
+    if(!branches.has(id))branches.set(id,[]);
+    branches.get(id).push(f);
+  }
+  const tree=$("#folder-tree");
+  const position=tree.scrollTop;
+  tree.replaceChildren();
+  for(const id of new Set([...groups.keys()].map(gid=>folderBranches.get(gid)).concat("hold"))){
+    const members=branches.get(id);
+    if(!members)continue;
+    const g=groups.get(id), node=document.createElement("details");
+    node.dataset.tree=id;node.open=expanded.has(id);
+    const destination=originalLayout.get(members[0].id);
+    const count=members.filter(f=>layout.has(f.id)&&selected.has(f.id)&&!layout.get(f.id).skip).length;
+    const folderTitle=destination?parentPath(destination.target).split(/[\\\\/]/).pop():"미분류";
+    const kind=!g?"원래 위치 유지":destination?.mode==="existing"?"기존 폴더":"새 폴더";
+    node.innerHTML='<summary>'+icon(g?"folder-notch":"tray")+'<strong>'+esc(folderTitle)+'</strong><small>'+kind+'</small><b>'+
+      (g?(layoutReady?"이동 "+count+" / "+members.length:"확인 중"):members.length+"개")+'</b></summary><div class="tree-children"></div>';
+    const paint=()=>{
+      const body=node.lastElementChild;
+      if(!node.open||body.childElementCount)return;
+      const notes=g?[...new Set(members.map(f=>groups.get(f.group)))].map(group=>
+        '<div class="branch-note"><span>'+esc(group.note)+'</span><button class="btn" data-edit="rename" data-group="'+esc(group.id)+'">이름 변경</button></div>').join(""):"";
+      body.innerHTML=notes+members.map(fileBranch).join("");
+    };
+    node.ontoggle=()=>{if(!node.isConnected)return;if(node.open)expanded.add(id);else expanded.delete(id);paint();};
+    paint();tree.append(node);
+  }
+  if(!visible.length)tree.textContent="표시할 파일이 없습니다.";
+  tree.scrollTop=position;
+  const checked=visible.filter(f=>selected.has(f.id)).length;
+  $("#all-check").checked=visible.length>0&&checked===visible.length;
+  $("#all-check").indeterminate=checked>0&&checked<visible.length;
+  document.querySelectorAll('[data-file-edit],[data-action="groupMenu"]').forEach(b=>b.disabled=busy||!editableIds().length);
+  if(focused?.check!==undefined)$('[data-check="'+focused.check+'"]')?.focus({preventScroll:true});
+  updateReviewBar();
 }
 function rows(){
-  const focusedCheck=document.activeElement?.dataset.check;
-  const arr=visibleFiles();page=Math.min(Math.max(0,Math.ceil(arr.length/PAGE_SIZE)-1),page);
-  const chunk=arr.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
-  $("#file-rows").innerHTML=chunk.map(f=>'<tr class="'+(activeId===f.id?"active-file ":"")+(selected.has(f.id)?"checked-file":"")+'" data-file="'+f.id+'" tabindex="0" aria-label="'+esc(f.name)+' 근거 보기" aria-selected="'+(activeId===f.id)+'"><td class="checkbox"><input type="checkbox" aria-label="'+esc(f.name)+' 선택" data-check="'+f.id+'" '+(selected.has(f.id)?"checked":"")+'></td><td><div class="filename" title="'+esc(f.name)+'">'+fileBadge(f.ext)+'<span><strong>'+esc(f.name)+'</strong><small title="'+esc(f.path)+'">'+esc(f.path?parentPath(f.path):"위치 정보 없음")+'</small></span></div></td><td>'+chip(f)+'</td><td class="score-col">'+(f.confidence==null?"—":f.confidence.toFixed(2))+'</td><td class="open-col">'+icon("caret-right")+'</td></tr>').join("");
-  $("#empty").hidden=!!arr.length;$("#empty").textContent=query?"필터와 일치하는 파일이 없습니다.":scope==="hold"?"미분류 파일이 없습니다.":"표시할 파일이 없습니다.";
-  $("#row-summary").textContent="파일 "+arr.length+"개"+(query?" 검색됨":"");
-  $("#page-tools").innerHTML=arr.length>PAGE_SIZE?ib("pagePrev","caret-left","이전 파일",page===0)+" "+(page+1)+" / "+Math.ceil(arr.length/PAGE_SIZE)+" "+ib("pageNext","caret-right","다음 파일",(page+1)*PAGE_SIZE>=arr.length):icon("clock")+" 마지막 분석 "+esc(data.time);
-  const checked=arr.filter(f=>selected.has(f.id)).length;
-  $("#all-check").checked=!!arr.length&&checked===arr.length;$("#all-check").indeterminate=checked>0&&checked<arr.length;
-  const ids=editableIds();
-  $("#selection-count").innerHTML=ids.length?'<strong>'+ids.length+'개 선택</strong><button data-action="deselect">해제</button>':'파일을 선택해 분류';
-  document.querySelectorAll('[data-file-edit],[data-action="groupMenu"]').forEach(b=>b.disabled=busy||!ids.length);
-  if(focusedCheck!==undefined)$('[data-check="'+focusedCheck+'"]')?.focus();
-  updateReviewBar();
+  if(!data||!$("#folder-tree"))return;
+  const ids=moveCandidates().map(f=>f.id),key=data.generation+"/"+ids.join(",");
+  if(key!==layoutKey){
+    layoutKey=key;layoutReady=false;layout=new Map();
+    call("review",{files:ids}).then(result=>{
+      if(key!==layoutKey)return;
+      layout=new Map(result.map(row=>[row.id,row]));layoutReady=true;paintTree();
+    }).catch(error=>{if(key===layoutKey){layoutKey="";errorDialog(error);}});
+  }
+  paintTree();
 }
 function infoRows(items){return '<dl class="info-list">'+items.filter(([,v])=>v!==undefined && v!==null && v!=="").map(([k,v])=>'<dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd>').join("")+'</dl>';}
 function syncInspector(){
   const el=$("#file-inspector");if(!el)return;
-  el.classList.toggle("open",detailOpen);$("#detail-scrim").hidden=!compactDetails.matches||!detailOpen;
+  el.closest(".review-workspace").classList.toggle("inspecting",detailOpen);el.classList.toggle("open",detailOpen);$("#detail-scrim").hidden=!compactDetails.matches||!detailOpen;
   el.setAttribute("role",compactDetails.matches?"dialog":"complementary");
   if(compactDetails.matches&&detailOpen)el.setAttribute("aria-modal","true");else el.removeAttribute("aria-modal");
 }
@@ -287,15 +339,27 @@ async function loadRelated(){
 }
 async function historyDialog(){
   const version=++searchVersion;
-  showDialog("최근 정리","이 앱에 실제로 저장된 최근 정리 기록입니다.",'<div id="history-list" aria-live="polite"><p class="empty">정리 기록을 불러오는 중…</p></div>',btn("close","닫기")+btn("undo","최근 이동 되돌리기","arrow-counter-clockwise"),null,true);
-  try{
-    const batches=await call("history");if(version!==searchVersion||!$("#history-list"))return;
-    $("#history-list").innerHTML=batches.length?'<p class="muted history-note">이동 수에는 이후 되돌린 파일도 포함됩니다. 시각은 기록의 최근 변경 시각입니다.</p>'+batches.slice(0,10).map(batch=>'<article class="history-batch"><div class="history-head"><strong>이동 '+esc(batch.moved)+'개</strong><span>최근 변경 <time>'+esc(batch.time)+'</time></span></div><p>되돌림 '+esc(batch.undone)+'개 · 남은 이동 '+esc(batch.pending)+'개</p>'+(batch.files.length?'<details><summary>기록된 파일 보기 · 최대 8개</summary><ul>'+batch.files.map(name=>'<li>'+esc(name)+'</li>').join("")+'</ul></details>':"")+'</article>').join(""):'<p class="empty">저장된 정리 기록이 없습니다.<br>이 앱에서 실제로 이동한 파일만 기록됩니다.</p>';
-  }catch(e){if(version===searchVersion&&$("#history-list"))$("#history-list").innerHTML='<p class="empty" role="alert">'+esc(e.message)+'</p>'+btn("history","다시 시도","arrows-clockwise");}
+  showDialog("정리 이력","","<div id='history-list' aria-live='polite'>기록을 불러오는 중…</div>",btn("close","닫기"),null,true);
+  const batches=await call("history");
+  if(version!==searchVersion||!$("#history-list"))return;
+  $("#history-list").innerHTML=batches.map(batch=>{
+    const summary=batch.readable?"이동 "+batch.moved+"개 · 복원 "+batch.undone+"개 · 남은 이동 "+batch.pending+"개":"이력 파일을 읽을 수 없습니다.";
+    return '<article class="history-batch"><div class="history-head"><strong>'+esc(batch.time)+'</strong>'+
+      '<button class="btn" data-history="'+esc(batch.id)+'" '+(batch.readable?"":"disabled")+'>파일과 경로 보기</button></div><p>'+summary+'</p></article>';
+  }).join("")||"정리 기록이 없습니다.";
+}
+async function historyDetail(batch){
+  const version=++searchVersion, records=await call("historyDetail",{batch});
+  if(version!==searchVersion)return;
+  const states={moved:"이동됨",undone:"복원됨",skipped:"건너뜀",failed:"실패",planned:"이동 미확인"};
+  const body=records.map(r=>'<div class="move-row"><b>'+esc(states[r.status]||r.status)+'</b>'+
+    infoRows([["원래 경로",r.source],["이동 경로",r.target],["사유",r.reason]])+'</div>').join("");
+  showDialog("정리 기록 상세","",body,btn("history","이력 목록")+
+    (records.some(r=>r.pending)?btn("submitDialog","이 작업 복원 미리보기","arrow-counter-clockwise",true):""),()=>preview("undo",{batch}),true);
 }
 function groupMenu(){
   const items=[],ids=editableIds();
-  const g=groups.get(scope)||groups.get(files.get(ids[0])?.group);
+  const g=groups.get(files.get(ids[0])?.group)||groups.get(scope);
   const add=(type,label,glyph)=>items.push('<button class="menu-btn" data-edit="'+type+'" data-group="'+esc(g?.id||"")+'">'+icon(glyph)+esc(label)+'</button>');
   if(ids.length){add("assign","다른 그룹으로 이동","folder-notch-open");add("create","새 그룹 만들기","folder-simple-plus");add("manual","체크한 파일을 폴더로 이동","arrow-square-out");}
   if(g){add("rename","그룹 이름 변경","pencil-simple");add("course","그룹 이름 확인","bookmark-simple");add("merge","두 그룹 병합","intersect");if(ids.length&&ids.length<g.count&&ids.every(id=>files.get(id).group===g.id))add("split","선택 파일로 그룹 분리","git-fork");}
@@ -327,12 +391,12 @@ async function editForm(kind,gid){
   $("#value").focus();$("#value").select();
 }
 async function preview(kind,args={}){
-  const targetFiles=kind==="organize"?moveCandidates().map(f=>f.id):editableIds();
-  const result=await call("preview",{kind,group:view==="review"&&scope!=="hold"?scope:null,files:targetFiles,...args});
+  const targetFiles=kind==="organize"?moveCandidates().map(f=>f.id):kind==="manual"?editableIds():[];
+  const result=await call("preview",{kind,files:targetFiles,...args});
   if(!result)return;
   const rows=result.rows,move=rows.filter(r=>!r.skip),byFolder=new Map();
   rows.forEach(r=>{const path=parentPath(r.target);if(!byFolder.has(path))byFolder.set(path,[]);byFolder.get(path).push(r);});
-  const title=kind==="undo"?"최근 이동 되돌리기":"폴더 정리 미리보기";
+  const title=kind==="undo"?"복원 경로 미리보기":"폴더 정리 미리보기";
   const body=[...byFolder].map(([p,fs])=>'<section class="move-group"><strong>'+icon("folder-notch")+esc(p)+'</strong>'+fs.map(f=>'<div class="move-row"><b>'+esc(f.name)+'</b>'+infoRows([["현재 경로",f.source],["이동할 경로",f.target]])+(f.skip?'<small>건너뜀 · '+esc(f.skip)+'</small>':"")+'</div>').join("")+'</section>').join("");
   showDialog(title,move.length+"개 파일 "+(kind==="undo"?"복원 예정":"이동 예정")+(rows.length>move.length?"   ·   "+(rows.length-move.length)+"개 건너뜀":""),
     body||'<p class="empty">처리할 파일이 없습니다.</p>',btn("close","취소")+
@@ -399,9 +463,8 @@ async function action(key){
     case "retryDetail":return detail(activeId);
     case "confirmCourse":return editForm("course",scope);
     case "submitDialog":{const fn=dialogAction;if(fn){const b=$('[data-action="submitDialog"]');if(b)b.disabled=true;try{await fn();}finally{if(b?.isConnected)b.disabled=false;}}return;}
-    case "pagePrev":page=Math.max(0,page-1);return rows();
-    case "pageNext":page++;return rows();
-    case "deselect":selected.clear();activeId=null;detailInfo=null;detailVersion++;detailOpen=false;return review();
+
+
     case "bridge":{const p=await call("bridge");showDialog("브라우저 출처 연결","확장 폴더 경로를 복사했어요.",
       '<p class="muted">Edge 또는 Chrome의 확장 관리에서 개발자 모드를 켜고 ‘압축 풀린 파일 로드’를 선택하세요. 아래 폴더를 지정한 뒤 다운로드한 웹페이지에서 확장 아이콘을 눌러 ‘이 사이트 연결’을 선택하세요. HTTPS 사이트의 페이지 제목과 출처를 이 PC에 기록합니다.</p><p class="preview-path" style="margin-top:12px">'+esc(p)+'</p>');return;}
   }
@@ -410,19 +473,19 @@ document.addEventListener("click",async e=>{
   try {
     const el=e.target.closest("button,input,tr[data-file]");if(!el)return;
     const d=el.dataset;
+    if(d.history)return await historyDetail(d.history);
     if(d.openResult){if(e.detail<2)await call("openSearchResult",{id:d.openResult});return;}
     if(d.copyPath){await navigator.clipboard.writeText(d.copyPath);toast("경로를 복사했어요.");return;}
     if(d.action)return await action(d.action);
     if(busy)return;
     if(d.removeRoot!==undefined){sourceDraft.roots.splice(Number(d.removeRoot),1);renderSources();return;}
-    if(d.view){if(d.view!=="search"&&!data)return await sourcesDialog();status("");view=d.view;scope=null;selected.clear();detailOpen=false;detailVersion++;render();return;}
+    if(d.view){if(d.view!=="search"&&!data)return await sourcesDialog();status("");view=d.view;scope=null;detailOpen=false;detailVersion++;render();return;}
     if(d.scope){setScope(d.scope);return;}
     if(d.fileEdit){const ids=editableIds();if(!ids.length)return;if(d.fileEdit==="unclassify")return await applyEdit({kind:"assign",files:ids,target:""});return await editForm(d.fileEdit,scope);}
     if(d.detailTab){detailTab=d.detailTab;renderInspector();if(detailTab==="related"&&relatedRows===null)return await loadRelated();return;}
     if(d.relatedFile!==undefined){
       const id=Number(d.relatedFile),f=files.get(id);if(!f)return;
-      if(!visibleFiles().some(x=>x.id===id)){scope=f.group||"hold";query="";selected.clear();activeId=null;page=0;render();}
-      const index=visibleFiles().findIndex(x=>x.id===id);page=Math.floor(index/PAGE_SIZE);rows();await detail(id);
+      query="";$("#search").value="";expanded.add(folderBranches.get(f.group)||"hold");rows();await detail(id);
       $('[data-file="'+id+'"]')?.scrollIntoView({block:"nearest"});return;
     }
     if(d.check!==undefined||el.id==="all-check"){

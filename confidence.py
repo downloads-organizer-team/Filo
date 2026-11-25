@@ -45,6 +45,9 @@ def detect(study,groups,rules):
     owners={m.index:g for g in groups for m in g.members}
     anchors=[m for g in groups for m in g.members]
     for f in study.files:
+        if f.hold_reason:
+            f.note=f.hold_reason
+            continue
         if f.index in rules.fixed:
             f.group=owners.get(f.index)
             f.state="직접 지정";f.first_band="확정";f.confidence=None

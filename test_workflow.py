@@ -23,7 +23,7 @@ class WorkflowTests(unittest.TestCase):
         for name in names:
             path=self.root/name
             path.parent.mkdir(exist_ok=True,parents=True)
-            path.write_text("sample",encoding="utf-8")
+            path.write_text(name,encoding="utf-8")
 
     def scan(self,mode="new",minimum=.7):
         return self.app.scan(dict(folderMode=mode,minConfidence=minimum,deep=False,covers=False))
@@ -46,16 +46,16 @@ class WorkflowTests(unittest.TestCase):
                                   "WHS 4기":set(program),"여름 프로젝트":set(summer)})
 
     def test_opaque_batch_requires_same_shape_and_verified_close_downloads(self):
-        names=["51aa2385ca91bcdef0ab.pdf","58aa2385ca91bcdbe0ae.pdf","59aa2385ca91bcdee0ae.pdf",
+        names=["51aa2385ca91bcdef0ab.pdf","58aa2385ca91bcdbe0ae.pdf","59aa2385ca91bcdee0ae.pdf","69aa2385ca91bcdee0ae.pdf",
                "be62b04a-901f-471e-818c-9ed65e1b1922.pdf"]
         self.create(*names)
         self.assertFalse(self.scan()["groups"])
-        times=[0,300,650,10]
+        times=[0,150,300,650,10]
         for f in self.app.study.files:
             stamp=datetime(2026,5,1,tzinfo=timezone.utc)+timedelta(seconds=times[names.index(f.name)])
             feedback.record_download(f.uid,DownloadContext(downloaded_at=stamp.isoformat()))
         self.scan()
-        self.assertEqual([{f.name for f in g.members} for g in self.app.study.groups],[set(names[:2])])
+        self.assertEqual([{f.name for f in g.members} for g in self.app.study.groups],[set(names[:3])])
         self.assertIn("다운로드",self.app.study.groups[0].title)
         self.assertFalse(self.scan(minimum=1)["groups"])
 
@@ -73,8 +73,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertGreater(similarity.refined(study,files["첨부.txt"],anchor),70)
 
     def test_program_position_and_joint_programs(self):
-        single=["[ACE] 네트워크 강의.pdf","작성자 박하나_후기_ACE.txt"]
-        joint=["WHS 4기 BOB 15기 공동 일정.pdf","BOB 15기 WHS 4기 참가 안내.docx"]
+        single=["[ACE] 네트워크 강의.pdf","작성자 박하나_후기_ACE.txt","[ACE] 발표자료.docx"]
+        joint=["WHS 4기 BOB 15기 공동 일정.pdf","BOB 15기 WHS 4기 참가 안내.docx","WHS 4기 BOB 15기 결과.xlsx"]
         self.create(*(single+joint))
         self.scan()
         self.assertEqual({g.title:{f.name for f in g.members} for g in self.app.study.groups},
@@ -91,7 +91,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_short_random_names_and_creation_time_without_a_source_do_not_group(self):
         short=["ab2c435f.pdf","ab2c435e.pdf"]
-        long=["51aa2385ca91bcdef0ab.pdf","58aa2385ca91bcdbe0ae.pdf"]
+        long=["51aa2385ca91bcdef0ab.pdf","58aa2385ca91bcdbe0ae.pdf","59aa2385ca91bcdee0ae.pdf"]
         self.create(*(short+long))
         self.assertFalse(self.scan()["groups"])
         for f in self.app.study.files:
@@ -111,13 +111,13 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(old.is_file())
         self.assertTrue((old.parent/"달빛정원_새 시안.png").is_file())
         self.app.execute(self.app.preview(dict(kind="undo")))
-        self.assertEqual(old.read_text(),"sample")
+        self.assertEqual(old.read_text(encoding="utf-8"),"보관함/달빛정원_이전 견적.pdf")
         self.assertTrue((self.root/"달빛정원_새 시안.png").is_file())
         self.assertFalse(self.scan("new")["groups"])
         self.assertFalse(self.scan("reuse",1)["groups"])
 
     def test_existing_folder_by_name_or_new_without_collision(self):
-        self.create("달빛정원/이전.txt","달빛정원_시안.png","달빛정원_견적.xlsx")
+        self.create("달빛정원/이전.txt","달빛정원_시안.png","달빛정원_견적.xlsx","달빛정원_일정.pdf")
         self.scan("reuse")
         existing=self.app.preview(dict(kind="organize"))
         self.assertEqual({Path(r["target"]).parent.name for r in existing["rows"]},{"달빛정원"})
@@ -132,14 +132,14 @@ class WorkflowTests(unittest.TestCase):
     def test_existing_project_folder_year_must_match(self):
         self.create("2025 여름 프로젝트/작년 문서.txt","2026 여름 프로젝트 1주차 보고서.pdf")
         self.assertFalse(self.scan("reuse")["groups"])
-        self.create("2026 여름 프로젝트 2주차 보고서.docx")
+        self.create("2026 여름 프로젝트 2주차 보고서.docx","2026 여름 프로젝트 3주차 보고서.xlsx")
         self.scan("reuse")
         self.assertEqual(len(self.app.study.groups),1)
         self.assertIsNone(self.app.study.groups[0].destination)
         self.create("2026 여름 프로젝트/올해 문서.txt")
         self.scan("reuse")
         rows=self.app.preview(dict(kind="organize"))["rows"]
-        self.assertEqual(len(rows),2)
+        self.assertEqual(len(rows),3)
         self.assertEqual({Path(r["target"]).parent.name for r in rows},{"2026 여름 프로젝트"})
 
     def test_identifiers_remain_distinct_in_folder_reuse(self):
@@ -181,7 +181,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(result["options"]["recursive"])
 
     def test_threshold_validation_persistence_and_manual_membership(self):
-        self.create("별빛_견적.pdf","별빛_시안.png")
+        self.create("별빛_견적.pdf","별빛_시안.png","별빛_일정.xlsx")
         for v in [-.1,.15,1.1,False,"0.7"]:
             with self.subTest(v=v),self.assertRaises(ValueError):self.scan(minimum=v)
         for step in range(11):

@@ -37,7 +37,7 @@ class RelationshipTests(unittest.TestCase):
         for name in names:
             path=self.root/name
             path.parent.mkdir(parents=True,exist_ok=True)
-            path.touch()
+            path.write_text(name,encoding="utf-8")
 
     def analyze(self,deep=False,metadata=None):
         original=scanner.scan
@@ -46,7 +46,7 @@ class RelationshipTests(unittest.TestCase):
             if metadata:
                 for f in study.files:metadata(f)
         with patch("engine.scan",side_effect=scan):
-            s=engine.analyze(self.root,deep=deep,course_covers=False)
+            s=engine.discover_relations(self.root,recursive=True,deep=deep,course_covers=False)
         return s,{f.name:f for f in s.files}
 
     def groups(self,study):
@@ -211,7 +211,7 @@ def benchmark():
                 root=base/str(count)
                 root.mkdir()
                 for i in range(count):
-                    (root/f"unit{i//2:06d}_{'proposal.pdf' if i%2 else 'budget.xlsx'}").touch()
+                    (root/f"unit{i//2:06d}_{'proposal.pdf' if i%2 else 'budget.xlsx'}").write_bytes(str(i).encode())
                 started=perf_counter()
                 stages={}
                 last_time=started

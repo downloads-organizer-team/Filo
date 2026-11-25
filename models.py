@@ -61,6 +61,8 @@ class File:
     first_band: str = "낮음"
     excerpt_status: str = ""
     course_cover_checked: bool = False
+    digest: str = ""
+    hold_reason: str = ""
     @property
     def name(self): return self.path.name
     @property
@@ -130,6 +132,7 @@ class FileRow(TypedDict):
     confidence: float | None
     size: int
     host: str
+    note: str
 
 
 class GroupRow(TypedDict):
@@ -141,6 +144,7 @@ class GroupRow(TypedDict):
 
 
 class ScanResult(TypedDict):
+    layout: list[dict]
     root: str
     roots: list[str]
     files: list[FileRow]
@@ -176,6 +180,8 @@ class RelatedFile(TypedDict):
 
 
 class HistoryEvent(TypedDict):
+    id: str
+    readable: bool
     time: str
     moved: int
     undone: int

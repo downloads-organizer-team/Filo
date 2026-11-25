@@ -96,7 +96,7 @@ class SourceTests(unittest.TestCase):
         for mode,destination in (("new",None),("new",self.destination),("existing",self.destination)):
             with self.subTest(mode=mode,destination=destination):
                 a=self.root/"alpha.txt";b=self.extra/"beta.txt"
-                a.write_text("alpha");b.write_text("beta")
+                a.write_text("alpha");b.write_text("beta");(self.root/"gamma.txt").write_text("gamma")
                 group=self.grouped()
                 args=dict(kind="organize",group=group.gid,destinationMode=mode)
                 if destination is not None:args["destination"]=str(destination)
@@ -112,8 +112,8 @@ class SourceTests(unittest.TestCase):
                 self.call("execute",token=undo["token"])
                 self.assertEqual(a.read_text(),"alpha");self.assertEqual(b.read_text(),"beta")
                 history=self.app.run("history",{})
-                self.assertEqual((history[0]["moved"],history[0]["undone"],history[0]["pending"]),(2,2,0))
-                self.assertEqual(set(history[0]["files"]),{"alpha.txt","beta.txt"})
+                self.assertEqual((history[0]["moved"],history[0]["undone"],history[0]["pending"]),(3,3,0))
+                self.assertEqual(set(history[0]["files"]),{"alpha.txt","beta.txt","gamma.txt"})
                 if mode=="new":self.assertFalse(folder.exists())
                 else:self.assertTrue(folder.is_dir())
 
@@ -151,7 +151,7 @@ class SourceTests(unittest.TestCase):
         preview=self.call("preview",kind="organize")
         self.app.run("sources",dict(roots=[str(self.extra)]))
         with self.assertRaises(ValueError):self.call("execute",token=preview["token"])
-        preview=self.call("preview",kind="organize")
+        preview=self.call("preview",kind="organize",destinationMode="existing",destination=str(self.destination))
         source.write_text("modified")
         self.call("execute",token=preview["token"])
         self.assertEqual(source.read_text(),"modified")
@@ -160,7 +160,7 @@ class SourceTests(unittest.TestCase):
     def test_replaced_source_identity_is_stale_even_with_same_metadata(self):
         source=self.extra/"alpha.txt";source.write_text("alpha")
         self.grouped()
-        preview=self.call("preview",kind="organize")
+        preview=self.call("preview",kind="organize",destinationMode="existing",destination=str(self.destination))
         old=source.stat()
         replacement=self.extra/"replacement.txt";replacement.write_text("alpha")
         os.utime(replacement,ns=(old.st_atime_ns,old.st_mtime_ns))
@@ -208,7 +208,7 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(result["results"],rows)
 
     def test_related_view_is_bounded_and_excludes_unrelated_files(self):
-        for number in range(1,9):(self.extra/f"별빛_시안_v{number}.txt").touch()
+        for number in range(1,9):(self.extra/f"별빛_시안_v{number}.txt").write_bytes(bytes([number]))
         (self.extra/"자동차보험.txt").touch()
         self.scan([str(self.extra)])
         source=next(f for f in self.data["files"] if f["name"]=="별빛_시안_v1.txt")
@@ -217,7 +217,7 @@ class SourceTests(unittest.TestCase):
         self.assertTrue(all(r["signals"] and r["id"]!=source["id"] for r in result))
 
     def test_related_view_honors_user_separation(self):
-        for number in (1,2):(self.extra/f"별빛_시안_v{number}.txt").touch()
+        for number in (1,2):(self.extra/f"별빛_시안_v{number}.txt").write_bytes(bytes([number]))
         self.scan([str(self.extra)])
         self.app.run("edit",dict(kind="cannot",files=[0,1],generation=self.data["generation"]))
         self.scan()

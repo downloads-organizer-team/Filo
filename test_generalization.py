@@ -16,24 +16,24 @@ import storage
 
 # None means that even two files sharing this label should stay unclassified.
 DESIGN = {
-    "북쪽 광장 프로젝트": ("북쪽 광장 프로젝트_예산.xlsx", "북쪽 광장 프로젝트_안내도.pdf"),
-    "남쪽 광장 프로젝트": ("남쪽 광장 프로젝트_예산.xlsx", "남쪽 광장 프로젝트_안내도.pdf"),
-    "RQ-53108": ("RQ-53108_견적.pdf", "발주서_RQ-53108.xlsx"),
-    "RQ-72914": ("RQ-72914_견적.pdf", "발주서_RQ-72914.xlsx"),
-    "필름산책": ("필름산책_콘티.pdf", "필름산책_촬영표.xlsx"),
-    "소리의 물리": ("소리의 물리 1주차 강의.pdf", "소리의 물리 2주차 실습.pptx"),
+    "북쪽 광장 프로젝트": ("북쪽 광장 프로젝트_예산.xlsx", "북쪽 광장 프로젝트_안내도.pdf","북쪽 광장 프로젝트_일정.txt"),
+    "남쪽 광장 프로젝트": ("남쪽 광장 프로젝트_예산.xlsx", "남쪽 광장 프로젝트_안내도.pdf","남쪽 광장 프로젝트_일정.txt"),
+    "RQ-53108": ("RQ-53108_견적.pdf", "발주서_RQ-53108.xlsx","RQ-53108_내역.csv"),
+    "RQ-72914": ("RQ-72914_견적.pdf", "발주서_RQ-72914.xlsx","RQ-72914_내역.csv"),
+    "필름산책": ("필름산책_콘티.pdf", "필름산책_촬영표.xlsx","필름산책_대본.txt"),
+    "소리의 물리": ("소리의 물리 1주차 강의.pdf", "소리의 물리 2주차 실습.pptx","소리의 물리 3주차 강의.docx"),
     None: ("[INTERNAL] 통근 버스 노선.pdf", "[INTERNAL] 의자 구매 요청.xlsx",
            "Untitled (2).png", "90213.zip", "고양이 사진.jpg"),
 }
 
 # Different names, languages, word positions, departments, and unrelated tags.
 VALIDATION = {
-    "Project Copper Orchard": ("Project Copper Orchard - Budget.xlsx", "Drawings (Project Copper Orchard).pdf"),
-    "Project Glass Orchard": ("Project Glass Orchard - Budget.xlsx", "Drawings (Project Glass Orchard).pdf"),
-    "MX-80461": ("검수증 [MX-80461].pdf", "mx80461_수령 확인.xlsx"),
-    "MX-19625": ("검수증 [MX-19625].pdf", "mx19625_수령 확인.xlsx"),
-    "모래시계": ("모래시계 - 자막.srt", "모래시계 - 원화.psd"),
-    "도시와 빛": ("도시와 빛 1주차.pdf", "도시와 빛 2주차.pptx"),
+    "Project Copper Orchard": ("Project Copper Orchard - Budget.xlsx", "Drawings (Project Copper Orchard).pdf","Project Copper Orchard - Site.dwg"),
+    "Project Glass Orchard": ("Project Glass Orchard - Budget.xlsx", "Drawings (Project Glass Orchard).pdf","Project Glass Orchard - Site.dwg"),
+    "MX-80461": ("검수증 [MX-80461].pdf", "mx80461_수령 확인.xlsx","MX-80461_송장.csv"),
+    "MX-19625": ("검수증 [MX-19625].pdf", "mx19625_수령 확인.xlsx","MX-19625_송장.csv"),
+    "모래시계": ("모래시계 - 자막.srt", "모래시계 - 원화.psd","모래시계 - 배경.png"),
+    "도시와 빛": ("도시와 빛 1주차.pdf", "도시와 빛 2주차.pptx","도시와 빛 3주차 실습.docx"),
     None: ("[SHARED] 오븐 설명서.pdf", "[SHARED] 조카 운동회.png",
            "무제 (3).png", "72104.zip", "당근케이크 재료.txt"),
 }
@@ -41,8 +41,8 @@ VALIDATION = {
 
 DOCUMENTS = {
     "별의 정원": ("별의 정원_원화.psd","별의 정원_타이포.ai","별의 정원_콘티.pdf"),
-    "Laurel Bay": ("Laurel Bay - permit.pdf","Laurel Bay - route.gpx"),
-    "오솔숲": ("영수증_오솔숲.pdf","오솔숲_invoice.xlsx"),
+    "Laurel Bay": ("Laurel Bay - permit.pdf","Laurel Bay - route.gpx","Laurel Bay - schedule.csv"),
+    "오솔숲": ("영수증_오솔숲.pdf","오솔숲_invoice.xlsx","오솔숲_시안.png"),
     None: ("invoice_도자기.pdf","invoice_치과.xlsx","영수증_연극.pdf","영수증_택시.jpg",
            "Receipt (1).pdf","Receipt (2).png","[NOTICE] 오븐 사용법.pdf","[NOTICE] 세탁 일정.xlsx",
            "memo.txt","notes.docx"),
@@ -83,7 +83,7 @@ def evaluate(labels, split=False):
         for root in roots:root.mkdir()
         names=[name for members in labels.values() for name in members]
         for i,name in enumerate(reversed(names) if split else names):
-            (roots[i%len(roots)]/name).touch()
+            (roots[i%len(roots)]/name).write_bytes(name.encode())
         if split:
             (roots[0]/"공용 자료").mkdir()
             (roots[0]/"공용 자료"/"이전 파일.pdf").touch()
@@ -92,7 +92,7 @@ def evaluate(labels, split=False):
             app=Desktop()
             app.scan(dict(roots=list(map(str,roots)),folderMode="new",minConfidence=.7,deep=split,covers=False))
         actual={frozenset(f.name for f in g.members):g.title for g in app.study.groups}
-    expected={frozenset(members):title for title,members in labels.items() if title is not None}
+    expected={frozenset(members):title for title,members in labels.items() if title is not None and len(members)>=3}
     found,wanted=pairs(actual),pairs(expected)
     titles=sum(actual.get(members,"").casefold()==title.casefold() for members,title in expected.items())
     return dict(correct=len(found&wanted),false=len(found-wanted),missed=len(wanted-found),

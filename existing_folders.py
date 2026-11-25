@@ -99,7 +99,7 @@ def recommend(study, stop):
             by_folder[best[0]].append(group)
     for f in study.files:
         stop()
-        if f.group or f.index in study.rules.fixed or study.opaque_formats[f.index]:
+        if f.group or f.hold_reason or f.index in study.rules.fixed or study.opaque_formats[f.index]:
             continue
         best = file_match(study, f, index)
         if not best:

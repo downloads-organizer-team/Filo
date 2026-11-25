@@ -11,17 +11,22 @@ from candidates import make,assign_title
 from confidence import detect
 from refinement import refine,summarize
 from constraints import Constraints
+from eligibility import identify_files, eligible_groups
+from existing_folders import recommend
+from storage import plan_group_folders
 import feedback
 
-def analyze(root,recursive=True,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,roots=None,min_confidence=.7):
+def discover_relations(root,recursive=False,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,roots=None,min_confidence=.7):
     start=perf_counter()
     s=Study(Path(root).absolute(),deep)
     s.min_confidence=min_confidence
     s.roots=[Path(p).absolute() for p in roots] if roots is not None else [s.root]
     status("파일 스캔 중");scan(s,recursive,stop)
+    status("고유 파일과 사본 확인 중");identify_files(s.files,stop)
     status("파일명과 메타데이터 분석 중");extract(s.files,stop)
     saved=feedback.load(s.files);s.revision=saved.revision
     rules=Constraints(s.files,saved);s.rules=rules
+    rules.hold.update(f.index for f in s.files if f.hold_reason)
     prepare(s);build(s,stop,status)
     status("완전 연결 계층 클러스터링 중")
     provisional=make(s,agglomerate(s,rules,stop),rules)
@@ -40,3 +45,17 @@ def analyze(root,recursive=True,deep=True,stop=lambda:None,status=lambda text:No
     s.groups.sort(key=lambda g:(g.title,g.gid))
     s.ms=round((perf_counter()-start)*1000)
     return s
+
+
+def analyze(root,recursive=False,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,
+            roots=None,min_confidence=.7,folder_mode="new"):
+    study = discover_relations(root,recursive,deep,stop,status,course_covers=course_covers,
+                               roots=roots,min_confidence=min_confidence)
+    study.folder_mode = folder_mode
+    if folder_mode == "reuse":
+        status("기존 폴더와 파일 이름 대조 중")
+        recommend(study,stop)
+    eligible_groups(study,plan_group_folders(study,mode=folder_mode))
+    summarize(study)
+    study.groups.sort(key=lambda g:(g.title,g.gid))
+    return study

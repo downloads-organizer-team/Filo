@@ -14,7 +14,7 @@ def supported_pair(study,i,j):
 
 def agglomerate(study,rules,stop):
     cutoff=round(100*affinity_floor(study.min_confidence))
-    units=[v[:] for v in rules.units.values() if v[0] not in rules.hold]
+    units=[remaining for unit in rules.units.values() if (remaining:=[i for i in unit if i not in rules.hold])]
     count=len(units)
     # A forbidden edge stays zero under the minimum update for complete linkage.
     dist=[bytearray(count) for _ in units]

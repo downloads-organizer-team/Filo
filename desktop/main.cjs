@@ -5,7 +5,7 @@ const {createInterface} = require("node:readline");
 const path = require("node:path");
 
 const root = path.dirname(__dirname);
-const allowed = new Set(["scan","options","sources","search","chooseFolder","detail","related","history","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
+const allowed = new Set(["scan","options","sources","search","chooseFolder","detail","related","history","historyDetail","review","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
 const pending = new Map();
 const iconCache = new Map();
 const searchRows = new Map();
@@ -81,7 +81,7 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
       return {ok:true,value:selected.canceled?null:selected.filePaths[0]||null};
     }
     if (action==="preview" && args.kind==="manual") {
-      const selected=await dialog.showOpenDialog(window,{title:"파일을 이동할 폴더",properties:["openDirectory","createDirectory"]});
+      const selected=await dialog.showOpenDialog(window,{title:"파일을 이동할 기존 폴더",properties:["openDirectory"]});
       if (selected.canceled) return {ok:true,value:null};
       args={...args,destination:selected.filePaths[0]};
     }

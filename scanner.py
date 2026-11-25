@@ -21,7 +21,7 @@ def check_directory(path):
 def scan(study, recursive, stop):
     roots = study.roots or [study.root]
     for root in roots:check_directory(root)
-    pending = list(reversed(roots))
+    pending = sorted(roots, key=lambda p: str(p).casefold(), reverse=True)
     visited = set()
     seen = set()
     while pending:

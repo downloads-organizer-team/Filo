@@ -19,8 +19,8 @@ def verify(executable,everything):
         downloads,extra,state,profile=(base/k for k in ("Downloads","Projects","State","Profile"))
         for path in (downloads,extra,state):
             path.mkdir()
-        for name in ("여름 프로젝트 1주차 보고서.txt","여름 프로젝트 2주차 보고서.txt","여름 프로젝트 3주차 보고서.txt","무제.txt"):
-            (extra/name).write_text("sample",encoding="utf-8")
+        for name in ("여름 프로젝트 1주차 보고서.txt","여름 프로젝트 2주차 보고서.txt","여름 프로젝트 3주차 보고서.txt","달빛정원_견적.xlsx","달빛정원_시안.png","달빛정원_일정.pdf","무제.txt"):
+            (extra/name).write_text(name,encoding="utf-8")
         (downloads/"제외한 위치.txt").touch()
         (extra/"보관").mkdir()
         (extra/"보관"/"옛 문서.txt").touch()
@@ -37,19 +37,25 @@ def verify(executable,everything):
         env=dict(os.environ,MOA_HOME=str(state),MOA_DOWNLOADS=str(downloads),MOA_EVERYTHING_INSTANCE=base.name)
         env.pop("MOA_EVERYTHING_DLL",None)
         env.pop("ELECTRON_RUN_AS_NODE",None)
-        process=subprocess.Popen([executable,"--remote-debugging-port=0","--remote-debugging-address=127.0.0.1",
-                                  "--user-data-dir="+str(profile),str(Path(__file__).resolve().parent/"desktop")],
-                                 env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        try:
+        def launch():
+            return subprocess.Popen([executable,"--remote-debugging-port=0","--remote-debugging-address=127.0.0.1",
+                                     "--user-data-dir="+str(profile),str(Path(__file__).resolve().parent/"desktop")],
+                                    env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
+        def connect(playwright,process):
             deadline=monotonic()+20
             port_file=profile/"DevToolsActivePort"
             while not port_file.exists() and process.poll() is None and monotonic()<deadline:
                 sleep(.1)
             port=port_file.read_text().splitlines()[0]
+            browser=playwright.chromium.connect_over_cdp("http://127.0.0.1:"+port)
+            context=browser.contexts[0]
+            return context.pages[0] if context.pages else context.wait_for_event("page")
+
+        process=launch()
+        try:
             with sync_playwright() as playwright:
-                browser=playwright.chromium.connect_over_cdp("http://127.0.0.1:"+port)
-                context=browser.contexts[0]
-                page=context.pages[0] if context.pages else context.wait_for_event("page")
+                page=connect(playwright,process)
                 page.wait_for_selector("#external-query")
                 errors=[]
                 page.on("pageerror",lambda error:errors.append(str(error)))
@@ -83,8 +89,8 @@ def verify(executable,everything):
                 await_id=directory.get_attribute("data-open-result")
                 directory.click()
                 page.wait_for_function("id=>window.openedResult===id",arg=await_id)
-                launch=page.get_by_role("button",name=script.name+" 파일 열기",exact=True)
-                launch.press("Enter")
+                launch_file=page.get_by_role("button",name=script.name+" 파일 열기",exact=True)
+                launch_file.press("Enter")
                 deadline=monotonic()+5
                 while not marker.exists() and monotonic()<deadline:sleep(.05)
                 assert marker.exists(),"The selected test file did not run"
@@ -125,38 +131,78 @@ def verify(executable,everything):
                 expect(dialog.locator("#source-roots")).not_to_contain_text(str(downloads))
                 dialog.get_by_role("button",name="분석 시작").click()
                 expect(page.locator("#root-path summary")).to_contain_text(str(extra))
-                expect(page.locator("#file-rows tr")).to_have_count(4)
+                groups=page.locator("#folder-tree details")
+                expect(groups).to_have_count(3)
+                expect(page.locator("#folder-tree details[open]")).to_have_count(0)
+                for title in ("여름 프로젝트","달빛정원"):
+                    page.locator("#folder-tree summary").filter(has_text=title).press("Enter")
+                expect(page.locator("#folder-tree details[open]")).to_have_count(2)
+                expect(page.locator("#review-count")).to_have_text("이동 대상 6개")
                 page.locator("#organize").click()
-                expect(dialog.locator(".move-row")).to_have_count(3)
+                expect(dialog.locator(".move-row")).to_have_count(6)
                 dialog.get_by_role("button",name="취소",exact=True).click()
                 filter_box=page.get_by_role("searchbox",name="현재 목록에서 파일명 필터")
                 filter_box.fill("무제")
                 expect(page.locator("#organize")).to_be_disabled()
                 filter_box.fill("2주차")
-                expect(page.locator("#review-count")).to_have_text("필터 결과 · 이동 대상 1개")
+                expect(page.locator("#review-count")).to_have_text("이동 대상 0개")
                 page.locator("#organize").click()
-                expect(dialog.locator(".move-row")).to_have_count(1)
-                expect(dialog.locator(".move-row")).to_contain_text("2주차")
+                expect(dialog.locator(".move-row")).to_contain_text("고유 파일 3개")
+                expect(dialog.get_by_role("button",name="1개 파일 이동")).to_have_count(0)
                 dialog.get_by_role("button",name="취소",exact=True).click()
-                filter_box.fill("")
-                page.get_by_role("checkbox",name="여름 프로젝트 1주차 보고서.txt 선택").check()
-                expect(page.locator("#review-count")).to_have_text("체크한 파일 · 이동 대상 1개")
+                filter_box.fill("여름 프로젝트")
+                box=page.get_by_role("checkbox",name="여름 프로젝트 1주차 보고서.txt 선택")
+                box.uncheck()
+                expect(page.locator("#review-hint")).to_contain_text("2개 보류")
+                box.check()
+                expect(page.locator("#review-count")).to_have_text("이동 대상 3개")
+                for title in ("여름 프로젝트","달빛정원"):
+                    filter_box.fill(title)
+                    page.locator("#organize").click()
+                    expect(dialog.locator(".move-row")).to_have_count(3)
+                    dialog.get_by_role("button",name="3개 파일 이동",exact=True).click()
+                    expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
+                    assert len(list((extra/title).iterdir()))==3
+                    dialog.get_by_role("button",name="닫기",exact=True).last.click()
+                assert not errors,errors
+                page.close()
+                process.wait(timeout=8)
+                (profile/"DevToolsActivePort").unlink(missing_ok=True)
+                process=launch()
+                page=connect(playwright,process)
+                dialog=page.get_by_role("dialog")
+                page.get_by_role("button",name="최근 정리",exact=True).click()
+                records=dialog.locator("[data-history]")
+                expect(records).to_have_count(2)
+                records.last.click()
+                expect(dialog.locator(".move-row")).to_have_count(3)
+                dialog.get_by_role("button",name="이 작업 복원 미리보기").click()
+                dialog.get_by_role("button",name="3개 파일 복원",exact=True).click()
+                expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
+                assert not (extra/"여름 프로젝트").exists()
+                assert len(list(extra.glob("여름 프로젝트*.txt")))==3
+                assert len(list((extra/"달빛정원").iterdir()))==3
+                assert (extra/"보관"/"옛 문서.txt").exists()
+                dialog.get_by_role("button",name="닫기",exact=True).last.click()
+                existing=extra/"여름 프로젝트"
+                existing.mkdir()
+                page.get_by_role("button",name="파일 정리하기").click()
+                dialog.locator('[value="reuse"]').check()
+                dialog.get_by_role("button",name="분석 시작").click()
+                single=page.get_by_role("searchbox",name="현재 목록에서 파일명 필터")
+                single.fill("2주차")
+                expect(page.locator("#folder-tree summary")).to_contain_text("기존 폴더")
+                expect(page.locator("#review-count")).to_have_text("이동 대상 1개")
                 page.locator("#organize").click()
-                expect(dialog.locator(".move-row")).to_have_count(1)
-                expect(dialog.locator(".move-row")).to_contain_text("1주차")
                 dialog.get_by_role("button",name="1개 파일 이동",exact=True).click()
                 expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
-                assert (extra/"여름 프로젝트"/"여름 프로젝트 1주차 보고서.txt").exists()
-                assert len(list(extra.glob("*.txt")))==3
+                assert len(list(existing.iterdir()))==1
                 dialog.get_by_role("button",name="닫기",exact=True).last.click()
-                page.get_by_role("button",name="파일 검색",exact=True).last.click()
                 page.get_by_role("button",name="이동 되돌리기",exact=True).click()
                 dialog.get_by_role("button",name="1개 파일 복원",exact=True).click()
                 expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
-                assert len(list(extra.glob("*.txt")))==4
-                assert (extra/"보관"/"옛 문서.txt").exists()
-                assert not errors,errors
-                print("PASS: delayed startup, reconnect, compact rows, folder icons, shell open, path copy, review, move and undo")
+                assert existing.is_dir() and not list(existing.iterdir())
+                print("PASS: search, folder tree, minimum, two moves, restart, older-batch restore and single-file reuse")
                 page.close()
         finally:
             try:
