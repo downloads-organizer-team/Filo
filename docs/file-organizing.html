@@ -331,6 +331,8 @@ under the SIL Open Font License 1.1 (see assets/fonts/OFL-*.txt).
 <div class="branches"><article class="branch"><p class="rule">sizes[f.size] == 1</p><h3>크기가 유일하면 1바이트 확인</h3><p>파일을 열고 1바이트 읽기를 시도합니다. 읽기에 성공하면 다음 파일로 넘어갑니다. 빈 파일은 0바이트를 반환합니다.</p></article><article class="branch hash"><p class="rule">sizes[f.size] &gt; 1</p><h3>크기가 겹치면 전체 읽기</h3><p>각 파일을 끝까지 읽어 SHA-256을 계산합니다. 크기와 해시가 같은 파일 중 하나를 대표로 남깁니다.</p></article></div>
 <p class="note">복사 번호가 없는 이름을 대표로 우선합니다. 나머지는 경로순으로 판정합니다. 내용이 같은 <code>A.exe</code>, <code>A (1).exe</code>, <code>A (2).exe</code>는 고유 파일 한 개입니다. 오프라인 파일과 읽기 오류가 난 파일은 보류합니다.</p></section>
 <section class="section" id="timing"><h2>검색과 파일 정리의 실측</h2>
+<h3>개발본 · 입력 후 첫 검색 결과</h3>
+<p>이미 실행 중인 Everything 1.5의 색인이 준비된 PC에서 검색어를 입력한 뒤 결과 145개가 화면에 표시되기까지 0.37초가 걸렸습니다. 외부 색인을 제외하고 빈 앱 프로필과 다운로드·테스트 폴더를 사용한 경우에는 0.25초에 파일 1개를 먼저 표시했습니다. 1.09초에는 더 깊은 폴더의 결과까지 2개가 표시됐습니다. 각 조건을 한 번씩 실행했고 검색 범위도 다릅니다.</p>
 <h3>v1.2.0 · 첫 색인과 파일명 검색</h3>
 <div class="table-wrap"><table><thead><tr><th>측정 구간</th><th>경과 시간</th><th>측정 방법</th></tr></thead><tbody>
 <tr><td>빈 색인에서 첫 결과까지</td><td><strong>192.6초</strong></td><td>빈 앱 프로필로 서비스를 시작했습니다. 기본 고정 드라이브를 색인하는 동안 약 1초 간격으로 검색해, 지정한 SDK 파일의 전체 경로가 결과에 처음 나타날 때까지 쟀습니다.</td></tr>

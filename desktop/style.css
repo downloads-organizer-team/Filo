@@ -69,6 +69,8 @@ dialog{width:min(530px,90vw);max-height:84vh;padding:0;border:1px solid #e7e5ee;
 .folder-tree summary i{color:#8b72ae}
 .folder-tree summary strong{min-width:0;overflow-wrap:anywhere;font-size:14px}
 .folder-tree summary small,.branch-note{font-size:12px;color:#605b70}
+.folder-tree summary small{flex:none}
+.folder-location{flex:1 1 6rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}
 .folder-tree summary b{margin-left:auto;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums}
 .branch-note{padding:3px 8px 5px 26px;overflow-wrap:anywhere}
 .tree-children{margin:0 0 6px 16px;border-left:1px solid #d7cee4}

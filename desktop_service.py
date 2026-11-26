@@ -90,7 +90,9 @@ class Desktop:
         self.generation=uuid4().hex
         files=[FileRow(id=f.index,name=f.name,path=str(f.path),ext=f.ext,group=f.group.gid if f.group else None,
                     state=f.state,confidence=f.confidence,size=f.size,host=f.host,note=f.note) for f in study.files]
-        groups=[GroupRow(id=g.gid,title=g.title,note=g.title_note,reason=group_reason(g),confidence=g.confidence,count=len(g.members))
+        groups=[GroupRow(id=g.gid,title=g.title,note=g.title_note,reason=group_reason(g),
+                         folderEvidence=g.destination_reason.split(" · ") if g.destination_reason else [],
+                         confidence=g.confidence,count=len(g.members))
                 for g in study.groups]
         return ScanResult(root=str(study.root),roots=list(map(str,study.roots)),files=files,groups=groups,options=settings,
                     layout=self.review({}),
@@ -362,7 +364,13 @@ def main():
                 try:
                     check()
                     query=file_search.validate_query(request.get("args",{}).get("query"))
-                    result=worker.request(query,check)
+                    try:
+                        result=worker.request(query,check)
+                    except file_search.EverythingUnavailable:
+                        if worker.engine is None:
+                            raise
+                        result=file_search.quick_search(query,check)
+                    check()
                     emit(dict(id=request["id"],ok=True,value=result))
                 except Exception as exc:
                     code="everythingUnavailable" if isinstance(exc,file_search.EverythingUnavailable) else "error"

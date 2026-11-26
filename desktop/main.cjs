@@ -19,7 +19,7 @@ function rememberFolders(layout){
     if(row.mode==="existing")reviewFolders.set(reviewFiles.get(row.id)?.group,path.dirname(row.target));
   }
 }
-let searchRevision=0;
+let searchRevision=0, searchQuery=null;
 let window, child, sequence=0, mutating=false;
 
 function startService() {
@@ -113,7 +113,10 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
       args={...args,destination:selected.filePaths[0]};
     }
     const revision=action==="search"?++searchRevision:null;
-    if(revision!==null)searchRows.clear();
+    if(revision!==null && args.query!==searchQuery){
+      searchRows.clear();
+      searchQuery=args.query;
+    }
     const reply=await call(action,args);
     if(action==="scan" && reply.ok){
       reviewGeneration=reply.value.generation;
@@ -136,8 +139,10 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
       if(refresh)reviewGeneration="";
     }
     if(action==="search" && reply.ok && revision===searchRevision){
+      const previousIds=new Map([...searchRows].map(([id,row])=>[row.path,id]));
+      searchRows.clear();
       reply.value.results.forEach((row,i)=>{
-        row.id=revision+"-"+i;
+        row.id=previousIds.get(row.path)??(revision+"-"+i);
         searchRows.set(row.id,row);
       });
     }

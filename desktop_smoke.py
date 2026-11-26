@@ -159,6 +159,8 @@ def verify(executable,everything):
                 expect(page.locator("#folder-tree details[open]")).to_have_count(0)
                 summary=page.locator("#folder-tree summary").filter(has_text="달빛정원")
                 folder_check=summary.get_by_role("checkbox")
+                expect(summary).to_have_attribute("title",str(extra/"달빛정원"))
+                expect(summary.locator(".folder-location")).to_have_text(str(extra/"달빛정원"))
                 expect(folder_check).to_be_checked()
                 folder_check.uncheck()
                 expect(page.locator("#review-count")).to_have_text("폴더 1개 · 파일 3개 선택")
@@ -272,6 +274,14 @@ def verify(executable,everything):
                 single=page.get_by_role("searchbox",name="현재 목록에서 파일명 필터")
                 single.fill("2주차")
                 expect(page.locator("#folder-tree summary")).to_contain_text("기존 폴더")
+                expect(page.locator("#folder-tree summary")).to_have_attribute("title",str(existing))
+                expect(page.locator("#folder-tree summary .folder-location")).to_have_text(str(existing))
+                shared_reason=page.evaluate("""() => branchReason([
+                    {folderEvidence:["보관 파일명","다운로드 출처"]},
+                    {folderEvidence:["보관 파일명"]},
+                    {folderEvidence:["보관 파일명"]}
+                ])""")
+                assert shared_reason=="폴더 안의 파일과 이름이 비슷함"
                 expect(page.locator("#review-count")).to_have_text("폴더 1개 · 파일 1개 선택")
                 folder_button=page.locator('[data-entry="folder"]')
                 folder_button.locator(".entry-text").click()

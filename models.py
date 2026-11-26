@@ -141,6 +141,7 @@ class FileRow(TypedDict):
 
 class GroupRow(TypedDict):
     reason: str
+    folderEvidence: list[str]
     id: str
     title: str
     note: str

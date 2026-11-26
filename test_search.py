@@ -34,7 +34,7 @@ class SearchTests(unittest.TestCase):
             worker.assert_not_called()
 
     def test_connection_is_reused_and_index_readiness_is_checked(self):
-        with patch("file_search.load_sdk") as load,patch("file_search.query_client") as query:
+        with patch.dict(os.environ,MOA_EVERYTHING_INSTANCE="test"),patch("file_search.load_sdk") as load,patch("file_search.query_client") as query:
             sdk=load.return_value
             sdk.Everything3_IsDBLoaded.side_effect=[False,True,True]
             client=file_search.SdkClient()
@@ -46,6 +46,36 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(sdk.Everything3_ConnectW.call_count,2)
             self.assertEqual(query.call_count,2)
             client.close()
+
+    def test_prefers_ready_existing_index_and_skips_unready_index(self):
+        for ready in (True,False):
+            with self.subTest(ready=ready),patch.dict(os.environ),patch("file_search.load_sdk") as load:
+                os.environ.pop("MOA_EVERYTHING_INSTANCE",None)
+                os.environ.pop("MOA_SEARCH_ROOTS",None)
+                sdk=load.return_value
+                sdk.Everything3_ConnectW.side_effect=[101,None,202]
+                sdk.Everything3_IsDBLoaded.return_value=ready
+                client=file_search.SdkClient()
+                client.connect()
+                self.assertEqual(client.client,101 if ready else 202)
+                self.assertEqual(sdk.Everything3_ConnectW.call_count,1 if ready else 3)
+                if not ready:sdk.Everything3_DestroyClient.assert_called_once_with(101)
+                client.close()
+
+    def test_early_search_finds_literal_names_and_respects_roots_and_cancel(self):
+        self.extra.mkdir()
+        self.downloads.mkdir()
+        nested=self.extra/"한글 폴더"
+        nested.mkdir()
+        expected=nested/"제안 [12].txt"
+        for path in (expected,self.downloads/expected.name,nested/"제안 2.txt"):path.touch()
+        with patch.dict(os.environ,MOA_DOWNLOADS=str(self.downloads),MOA_SEARCH_ROOTS=str(self.extra)):
+            result=file_search.quick_search("[12]",lambda:None)
+            self.assertTrue(result["partial"])
+            self.assertEqual([Path(r["path"]) for r in result["results"]],[expected])
+            self.assertTrue(file_search.quick_search("한글",lambda:None)["results"][0]["isFolder"])
+            with self.assertRaises(InterruptedError):
+                file_search.quick_search("[12]",Mock(side_effect=InterruptedError))
 
     def test_missing_bundled_engine_reports_reinstall(self):
         with patch.dict(os.environ), patch.object(search_engine, "ENGINE", self.root / "absent.exe"):
@@ -170,8 +200,8 @@ def verify_live_sdk(query,expected):
                     service.stdin.flush()
                     # Keep stdin open, exactly as Electron does while awaiting a reply.
                     response=json.loads(service.stdout.readline())
-                    if response["ok"]:break
-                    assert response.get("code")=="everythingUnavailable" and perf_counter()-started<20,response
+                    if response["ok"] and not response["value"].get("partial"):break
+                    assert (response["ok"] or response.get("code")=="everythingUnavailable") and perf_counter()-started<20,response
                     sleep(.25)
                 result=response["value"]
                 expected_backend = "Everything 1.5 SDK" if "MOA_EVERYTHING_INSTANCE" in environment else "내장 Everything"

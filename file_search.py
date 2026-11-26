@@ -1,4 +1,5 @@
 """Live literal filename queries against the Everything 1.5 index."""
+from collections import deque
 from collections.abc import Callable
 import ctypes
 import json
@@ -10,9 +11,10 @@ import re
 import subprocess
 import sys
 from time import perf_counter, sleep
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
-from search_engine import BundledEngine, private_instance
+import storage
+from search_engine import BundledEngine, index_roots, private_instance
 
 LIMIT = 200
 CONNECT_MESSAGE = "검색 엔진을 시작하고 있습니다. 준비되면 자동으로 검색합니다."
@@ -31,6 +33,7 @@ class SearchResult(TypedDict):
     elapsed: int
     truncated: bool
     note: str
+    partial: NotRequired[bool]
 
 
 class InvalidQuery(ValueError):
@@ -57,6 +60,53 @@ def validate_query(query):
     if not 1 <= len(query) <= 200 or re.search(r'[\\/:*?"<>|\x00-\x1f]', query):
         raise InvalidQuery()
     return query
+
+
+def quick_search(query, stop):
+    """Show nearby names while Everything builds its first full index."""
+    started = perf_counter()
+    scope = list(map(Path, index_roots()))
+    candidates = [storage.downloads_folder(), *map(Path, storage.source_roots()),
+                  Path.home() / "Desktop", Path.home() / "Documents"]
+    if "MOA_SEARCH_ROOTS" in os.environ:
+        candidates.extend(scope)
+    roots = list(dict.fromkeys(p for p in candidates if any(p.is_relative_to(drive) for drive in scope)))
+    pending = deque((p, 0) for p in roots)
+    visited = set(roots)
+    needle = query.casefold()
+    rows = []
+    total = examined = 0
+    # A short breadth-first pass prioritizes all root folders over descendants.
+    # The full index handles deep paths and large directories on completion.
+    deadline = perf_counter() + .15
+    while pending and perf_counter() < deadline and examined < 12000:
+        stop()
+        directory, depth = pending.popleft()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if examined % 32 == 0:
+                        stop()
+                        if perf_counter() >= deadline or examined >= 12000:
+                            break
+                    examined += 1
+                    folder = entry.is_dir(follow_symlinks=False)
+                    if needle in entry.name.casefold():
+                        total += 1
+                        if len(rows) < LIMIT:
+                            rows.append(SearchFile(name=entry.name,path=entry.path,isFolder=folder))
+                    if folder and depth < 2 and not entry.is_junction():
+                        child = Path(entry.path)
+                        if child not in visited:
+                            visited.add(child)
+                            pending.append((child, depth + 1))
+        except InterruptedError:
+            raise
+        except OSError:
+            continue
+    return SearchResult(backend="자주 쓰는 폴더", results=rows, total=total,
+                        elapsed=round((perf_counter()-started)*1000), truncated=total>LIMIT,
+                        partial=True, note="전체 드라이브 색인 중")
 
 
 def load_sdk():
@@ -135,6 +185,7 @@ class SdkClient:
     def __init__(self):
         self.sdk=None
         self.client=None
+        self.backend="Everything 1.5 SDK"
 
     def connect(self):
         if self.client:
@@ -145,7 +196,17 @@ class SdkClient:
             except (OSError,AttributeError) as exc:
                 raise SdkMissing("Everything 검색 SDK를 불러올 수 없습니다. 앱의 vendor 폴더와 x64 DLL을 확인하세요.") from exc
         instance = os.environ.get("MOA_EVERYTHING_INSTANCE")
+        if instance is None and "MOA_SEARCH_ROOTS" not in os.environ:
+            for name in ("", "1.5a"):
+                client = self.sdk.Everything3_ConnectW(name)
+                if client:
+                    if self.sdk.Everything3_IsDBLoaded(client):
+                        self.client = client
+                        self.backend = "Everything 1.5 SDK"
+                        return
+                    self.sdk.Everything3_DestroyClient(client)
         self.client = self.sdk.Everything3_ConnectW(private_instance() if instance is None else instance)
+        self.backend = "내장 Everything" if instance is None else "Everything 1.5 SDK"
         if not self.client:
             raise EverythingUnavailable(CONNECT_MESSAGE)
 
@@ -161,7 +222,9 @@ class SdkClient:
             self.close()
             raise IndexLoading("파일 이름 색인을 준비하고 있습니다. 첫 실행에는 시간이 걸릴 수 있습니다.")
         try:
-            return query_client(self.sdk,self.client,query)
+            result = query_client(self.sdk,self.client,query)
+            result["backend"] = self.backend
+            return result
         except OSError as exc:
             self.close()
             raise EverythingUnavailable(CONNECT_MESSAGE) from exc
@@ -270,8 +333,6 @@ class SearchWorker:
         stop()
         if value is not None:
             value["elapsed"]=round((perf_counter()-start)*1000)
-            if self.engine is not None:
-                value["backend"] = "내장 Everything"
         return value
 
 
