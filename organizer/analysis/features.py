@@ -2,6 +2,8 @@ import json
 import os
 import re
 import unicodedata
+from collections import defaultdict
+from itertools import groupby
 from pathlib import Path
 from urllib.parse import urlsplit
 from organizer.models import DownloadContext
@@ -23,7 +25,7 @@ ALIASES = {"춘계축제":"봄축제","봄축전":"봄축제","dataanalytics":"�
 VERSION = re.compile(r"\(\s*\d+\s*\)|진짜\s*최종(?:본)?\d*|최종(?:본)?\d*|수정(?:본)?\d*|(?<![a-z])(?:final|copy|version|ver|rev|v)\s*\d*(?![a-z])",re.I)
 TASK_SEPARATOR = re.compile(r"\s*_+\s*|\s+[-–—]\s+")
 PREFIX = re.compile(r"^\s*(\d{1,3}(?:[-.]\d{1,2})?)(?=[\s_.-]|$)")
-SERIES = re.compile(r"(?:(\d{1,3})\s*(주차|회차|강(?!의))|(?<![a-z])(week|wk|lecture|lec|chapter|chap|ch|practice)[ _.-]*(\d{1,3}))(?!\d)")
+SERIES = re.compile(r"(?:(\d{1,3})\s*(주차|회차|강(?!의))|(?<![a-z0-9])(week|wk|w|lecture|lec|chapter|chap|ch|practice|episode|ep)[ _.-]*(\d{1,3}))(?!\d)")
 YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
 ACADEMIC_YEAR = re.compile(r"(?<!\d)(20\d{2})\s*(?:학년도|학번|(?:년\s*)?[-_. ]?\s*[12]\s*학기)")
 ATOMS = re.compile(r"[a-z]+[0-9]*|[가-힣]+[a-z0-9]*|[0-9]+|[^\W_]+",re.I)
@@ -55,7 +57,7 @@ def filename(f):
     s=SERIES.search(text);pre=PREFIX.match(text)
     if s:
         tag=s[2] or s[3];f.sequence=s[0];f.number=int(s[1] or s[4])
-        f.pattern="주차" if tag in {"주차","week","wk"} else "강의" if tag in {"강","lecture","lec"} else "회차"
+        f.pattern="주차" if tag in {"주차","week","wk","w"} else "강의" if tag in {"강","lecture","lec"} else "회차"
         text=text[:s.start()]+" "+text[s.end():]
     elif pre:
         f.sequence=pre[1];f.pattern="순번";f.number=int(re.split(r"[.-]",pre[1])[0]);text=text[pre.end():]
@@ -94,6 +96,49 @@ def task_prefixes(files):
         if prefix:tails.setdefault(prefix,set()).add(tail)
         prefixes.append(prefix)
     return [p if p and len(tails[p])>=2 else "" for p in prefixes]
+
+
+def numbered_series(files):
+    """Find runs with an unambiguous episode title and recurring deliverables."""
+    buckets = defaultdict(lambda: defaultdict(list))
+    for f in files:
+        if f.hold_reason or not f.ext or f.number is None:
+            continue
+        stem = VERSION.sub(" ", clean(f.path.stem))
+        marker = SERIES.search(stem)
+        if not marker:
+            continue
+        prefix = stem[:marker.start()].strip(" ._-")
+        title = re.sub(r"[\W_]+", "", stem[marker.end():])
+        if not title or not any(c.isalpha() for c in title):
+            continue
+        tag = marker[2] or marker[3]
+        buckets[f.path.parent, prefix, tag][f.number].append((title, f))
+
+    result = [None] * len(files)
+    for (_, prefix, _), slots in buckets.items():
+        # A repeated slot with different titles can signal interleaved courses.
+        if any(len({title for title, _ in rows}) != 1 for rows in slots.values()):
+            continue
+        named = bool(set(tokenize(prefix)) - TASK_GENERIC)
+        # A lone file at the edge of an unnamed series should not veto the run.
+        supported = sorted(n for n, rows in slots.items() if named or len({f.ext for _, f in rows}) >= 2)
+        for _, run in groupby(enumerate(supported), key=lambda pair: pair[1] - pair[0]):
+            numbers = [number for _, number in run]
+            if len(numbers) < 3:
+                continue
+            formats = [{f.ext for _, f in slots[n]} for n in numbers]
+            if not named and len(set.intersection(*formats)) < 2:
+                continue
+            if len({slots[n][0][0] for n in numbers}) < 3:
+                continue
+            members = [f for n in numbers for _, f in slots[n]]
+            if len({f.course_scope for f in members if f.course_scope}) > 1:
+                continue
+            series_id = min(f.index for f in members)
+            for f in members:
+                result[f.index] = series_id
+    return result
 
 def zone_transfer(path):
     if os.name!="nt":return {}

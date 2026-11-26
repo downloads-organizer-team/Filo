@@ -11,7 +11,7 @@ def key(text):
     return "".join(unicodedata.normalize("NFKC",text).casefold().split())
 
 
-PREFIX=re.compile(r"^\s*(?:\d{1,3}[. )_-]+)?(.{2,70}?)[ _-]+(?:제?\d+\s*주(?:차|째)|강의\s*(?:보충|자료|\d)|(?:week|lecture|lec|chapter|chap)[ ._-]*\d)",re.I)
+PREFIX=re.compile(r"^\s*(?:\d{1,3}[. )_-]+)?(.{2,70}?)[ _-]+(?:제?\d+\s*주(?:차|째)|강의\s*(?:보충|자료|\d)|(?:week|wk|w|lecture|lec|chapter|chap|ch|episode|ep)[ ._-]*\d)",re.I)
 
 
 def find_title(members,read_covers,*,filename_prefix=True):

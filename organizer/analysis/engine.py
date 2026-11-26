@@ -41,7 +41,7 @@ def discover_relations(root,recursive=False,deep=True,stop=lambda:None,status=la
     for group in tracked(s.groups,progress):
         stop()
         assign_title(s,group,saved,read_covers)
-        if group.title_kind in {"activity","batch"}:
+        if group.title_kind in {"activity","batch","series"}:
             for file in group.members:
                 if file.state=="1차 추천":file.note=group.title_note
     s.groups.sort(key=lambda g:(g.title,g.gid))

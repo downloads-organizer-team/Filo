@@ -8,6 +8,7 @@ import sys
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 from contextlib import ExitStack
+from datetime import datetime
 
 from tests.test_search import isolated_instance
 
@@ -62,6 +63,23 @@ def verify(executable,everything):
                 page.on("pageerror",lambda error:errors.append(str(error)))
                 expect(page.locator("#external-query")).to_be_focused()
                 assert not (state/"feedback.sqlite3").exists()
+                page.get_by_role("button",name="설정",exact=True).click()
+                dialog=page.get_by_role("dialog")
+                expect(dialog.get_by_role("radio",name="시스템")).to_be_checked()
+                expect(dialog.get_by_role("radio",name="작게")).to_be_checked()
+                startup_theme=page.locator("html").get_attribute("data-theme")
+                assert startup_theme==page.evaluate("window.desktop.appearance('system','small')")
+                pixel_ratio=page.evaluate("devicePixelRatio")
+                for label in ("보통","크게"):
+                    dialog.get_by_role("radio",name=label).check()
+                    page.wait_for_function("r=>devicePixelRatio>r",arg=pixel_ratio)
+                    pixel_ratio=page.evaluate("devicePixelRatio")
+                dialog.get_by_role("radio",name="작게").check()
+                for label,theme in (("라이트","light"),("다크","dark")):
+                    dialog.get_by_role("radio",name=label).check()
+                    expect(page.locator("html")).to_have_attribute("data-theme",theme)
+                    expect(page.locator(".brand-"+theme)).to_be_visible()
+                dialog.get_by_role("button",name="닫기",exact=True).last.click()
                 search=page.locator("#external-query")
                 search.fill("discarded-query")
                 search.fill(prefix)
@@ -76,7 +94,7 @@ def verify(executable,everything):
                 expect(directory.locator(".result-folder")).to_be_visible()
                 height=rows.first.bounding_box()["height"]
                 viewport=page.locator(".search-list .table-scroll").bounding_box()["height"]
-                assert height<=24 and viewport/height>=20,(height,viewport)
+                assert 25<=height<=26 and viewport/height>=20,(height,viewport)
                 print(f"Search row {height:g}px; {int((viewport-24)//height)} complete rows fit")
                 # Observe the completed real Windows shell dispatch for a temporary directory.
                 page.evaluate("""() => {
@@ -88,6 +106,9 @@ def verify(executable,everything):
                     };
                 }""")
                 await_id=directory.get_attribute("data-open-result")
+                directory.locator("xpath=ancestor::tr").locator(".search-path span").click()
+                expect(page.locator("#selected-path")).to_contain_text(str(folder))
+                expect(page.locator("#selected-modified")).to_contain_text(str(datetime.fromtimestamp(folder.stat().st_mtime).year))
                 directory.locator(".entry-text").click()
                 assert not page.evaluate("Boolean(window.openedResult)")
                 directory.locator(".entry-text").dblclick()
@@ -99,7 +120,9 @@ def verify(executable,everything):
                 bounds=launch_file.bounding_box()
                 launch_file.dblclick(position={"x":bounds["width"]-3,"y":8})
                 assert not marker.exists()
-                expect(launch_file).to_have_attribute("aria-pressed","false")
+                expect(launch_file).to_have_attribute("aria-pressed","true")
+                expect(page.locator("#selected-path")).to_contain_text(str(script))
+                expect(page.locator("#selected-modified")).to_contain_text(str(datetime.fromtimestamp(script.stat().st_mtime).year))
                 name_text.click()
                 expect(launch_file).to_have_attribute("aria-pressed","true")
                 assert not marker.exists()
@@ -118,6 +141,7 @@ def verify(executable,everything):
                 editor.press("Enter")
                 expect(page.get_by_role("button",name=renamed+" 파일 열기",exact=True)).to_be_visible()
                 assert (inbox/renamed).is_file() and not (inbox/(prefix+"-00.txt")).exists()
+                expect(page.locator("#selected-path")).to_contain_text(str(inbox/renamed))
                 stale=await_id
                 # Keep the Windows user's clipboard intact while checking which path is copied.
                 copy=page.locator("[data-copy-path]").first
@@ -135,16 +159,16 @@ def verify(executable,everything):
                 expect(rows.first).to_contain_text(renamed)
                 search.fill("")
                 expect(page.locator("#search-rows tr")).to_have_count(0)
+                expect(page.locator("#search-selection")).to_be_hidden()
                 assert not page.evaluate("id=>window.desktop.call('openSearchResult',{id})",stale)["ok"]
                 page.get_by_role("button",name="파일 정리하기").click()
                 dialog=page.get_by_role("dialog")
-                slider=dialog.get_by_role("slider")
+                expect(dialog.get_by_role("radio",name="균형",exact=True)).to_be_checked()
                 descriptions=set()
-                for i in range(11):
-                    slider.press("Home" if i==0 else "ArrowRight")
+                for label in ("엄격하게","폭넓게","균형"):
+                    dialog.get_by_role("radio",name=label,exact=True).check()
                     descriptions.add(dialog.locator("#min-description").inner_text())
-                assert len(descriptions)==11
-                for _ in range(3):slider.press("ArrowLeft")
+                assert len(descriptions)==3
                 dialog.locator('[value="new"]').check()
                 dialog.get_by_role("button",name="분석 시작").click()
                 expect(page.locator("#root-path summary")).to_contain_text("외 1개")
@@ -248,13 +272,17 @@ def verify(executable,everything):
                     assert len(list(destination.iterdir()))==3
                     dialog.get_by_role("button",name="닫기",exact=True).last.click()
                 assert not errors,errors
+                page.get_by_role("button",name="설정",exact=True).click()
+                dialog.get_by_role("radio",name="크게").check()
                 page.close()
                 process.wait(timeout=8)
                 (profile/"DevToolsActivePort").unlink(missing_ok=True)
                 process=launch()
                 page=connect(playwright,process)
                 dialog=page.get_by_role("dialog")
+                page.wait_for_function("r=>Math.abs(devicePixelRatio-r)<0.01",arg=pixel_ratio)
                 page.get_by_role("button",name="최근 정리",exact=True).click()
+                expect(page.locator("html")).to_have_attribute("data-theme","dark")
                 records=dialog.locator("[data-history]")
                 expect(records).to_have_count(4)
                 records.nth(1).click()
@@ -305,7 +333,7 @@ def verify(executable,everything):
                 assert existing.is_dir() and not list(existing.iterdir())
                 dialog.get_by_role("button",name="닫기",exact=True).last.click()
                 page.get_by_role("button",name="정리할 폴더 변경").click()
-                dialog.get_by_label("묶는 기준").select_option("extension")
+                dialog.get_by_role("radio",name="확장자별").check()
                 expect(dialog.locator("#min-confidence")).to_be_hidden()
                 dialog.get_by_role("button",name="분석 시작").click()
                 expect(page.locator("#folder-tree summary").filter(has_text="TXT")).to_have_count(1)

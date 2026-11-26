@@ -100,6 +100,30 @@ def evaluate(labels, split=False):
 
 
 class GeneralizationTests(unittest.TestCase):
+    def test_numbered_series_forms_one_folder_across_episode_titles(self):
+        topics = ("빛깔", "틀짜기", "섬유", "판화", "거푸집", "도금", "안료", "옻칠", "매듭")
+        for marker, extensions in (("W", ("pdf", "zip")), ("Episode ", ("srt", "wav"))):
+            with self.subTest(marker=marker):
+                names = [f"{marker}{i:02}_{title}.{ext}" for i, title in enumerate(topics, 1)
+                         for ext in extensions]
+                scores, actual = evaluate({"시리즈": names, None: (f"{marker}10_북마크.txt", "chap.1 소풍.txt", "chap.2 파도.txt")})
+                self.assertEqual((scores["false"], scores["missed"]), (0, 0), actual)
+                self.assertEqual(set(actual), {frozenset(names)})
+
+    def test_shared_chapter_marker_cannot_join_competing_series(self):
+        names = [f"chap.{i} {topic}.{ext}" for topics in (("quartz", "jasper", "agate"),
+                                                           ("valve", "gasket", "piston"))
+                 for i, topic in enumerate(topics, 1) for ext in ("pdf", "zip")]
+        scores, actual = evaluate({None: names})
+        self.assertEqual(scores["false"], 0, actual)
+
+    def test_overlapping_chapters_with_series_names_keep_both_folders(self):
+        labels = {course: [f"{course} chapter {i} - {title}.txt"
+                           for i, title in enumerate(("tooling", "assembly", "finishing"), 1)]
+                  for course in ("Juniper Workshop", "Falcon Studio")}
+        scores, actual = evaluate(labels)
+        self.assertEqual((scores["false"], scores["missed"], scores["titles"]), (0, 0, 2), actual)
+
     def test_inbox_membership_titles_and_layout(self):
         for labels in (DESIGN,VALIDATION,DOCUMENTS):
             for split in (False,True):

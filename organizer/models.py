@@ -92,6 +92,7 @@ class Study:
     primary: list[bytearray] = field(default_factory=list)
     vectors: list[Vector] = field(default_factory=list)
     task_prefixes: list[str] = field(default_factory=list)
+    series_ids: list[int | None] = field(default_factory=list)
     extras: dict[int,Vector] = field(default_factory=dict)
     medium: set[int] = field(default_factory=set)
     attempted: set[int] = field(default_factory=set)

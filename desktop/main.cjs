@@ -1,6 +1,7 @@
-const {app, BrowserWindow, ipcMain, dialog, clipboard, shell} = require("electron");
+const {app, BrowserWindow, ipcMain, dialog, clipboard, shell, nativeTheme} = require("electron");
 const {spawn} = require("node:child_process");
 const {existsSync} = require("node:fs");
+const {stat} = require("node:fs/promises");
 const {createInterface} = require("node:readline");
 const path = require("node:path");
 
@@ -58,6 +59,29 @@ function call(action,args) {
   });
 }
 function isLocal(event) {return window && event.senderFrame===window.webContents.mainFrame;}
+const zoomFactors={small:1,medium:1.12,large:1.25};
+function windowColors(){
+  return nativeTheme.shouldUseDarkColors
+    ? {color:"#0F0F15",symbolColor:"#F2F1FA"}
+    : {color:"#F8F8FB",symbolColor:"#1F1E2E"};
+}
+function syncTheme(){
+  const effective=nativeTheme.shouldUseDarkColors?"dark":"light";
+  if(window && !window.isDestroyed()){
+    const colors=windowColors();
+    window.setBackgroundColor(colors.color);
+    window.setTitleBarOverlay({...colors,height:38});
+    window.webContents.send("theme-changed",effective);
+  }
+  return effective;
+}
+ipcMain.handle("appearance",(event,theme,size)=>{
+  if(!isLocal(event)||!["system","light","dark"].includes(theme)||!Object.hasOwn(zoomFactors,size))return;
+  nativeTheme.themeSource=theme;
+  window.webContents.setZoomFactor(zoomFactors[size]);
+  return syncTheme();
+});
+nativeTheme.on("updated",()=>{if(nativeTheme.themeSource==="system")syncTheme();});
 async function fileIcon(row) {
   const key=path.extname(row.name).toLowerCase();
   if(!iconCache.has(key)){
@@ -70,6 +94,12 @@ async function fileIcon(row) {
 }
 ipcMain.handle("desktop",async(event,action,args={})=>{
   if (!isLocal(event)) return {ok:false,error:"지원하지 않는 작업입니다."};
+  if(action==="searchModified"){
+    const row=searchRows.get(args.id);
+    if(!row)return {ok:true,value:null};
+    try{return {ok:true,value:(await stat(row.path)).mtimeMs};}
+    catch{return {ok:true,value:null};}
+  }
   if(action==="openReviewEntry"){
     const source=args.entry==="file"?reviewFiles.get(args.id)?.path:reviewFolders.get(args.id);
     if(args.generation!==reviewGeneration||!source)return {ok:false,error:"목록에서 다시 선택하세요."};
@@ -160,9 +190,9 @@ ipcMain.on("cancel-search",event=>{
 function createWindow() {
   startService();
   window=new BrowserWindow({width:1380,height:920,minWidth:870,minHeight:630,show:false,
-    title:"다운로드 정리",backgroundColor:"#f9f9fc",autoHideMenuBar:true,
-    icon:path.join(root,"icons","brand.png"),titleBarStyle:"hidden",
-    titleBarOverlay:{color:"#f8f8fb",symbolColor:"#55546a",height:38},
+    title:"다운로드 정리",backgroundColor:windowColors().color,autoHideMenuBar:true,
+    icon:path.join(__dirname,"assets","downloads.ico"),titleBarStyle:"hidden",
+    titleBarOverlay:{...windowColors(),height:38},
     webPreferences:{preload:path.join(__dirname,"preload.cjs"),sandbox:true,contextIsolation:true,nodeIntegration:false}});
   window.removeMenu();
   window.webContents.setWindowOpenHandler(()=>({action:"deny"}));

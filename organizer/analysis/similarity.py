@@ -3,7 +3,7 @@ from math import log, sqrt
 import os
 from datetime import datetime
 from urllib.parse import urlsplit
-from organizer.analysis.features import LEXICON, ALIASES, TASK_GENERIC, TASK_SEPARATOR, VERSION, clean, tokenize, task_name, task_prefixes
+from organizer.analysis.features import LEXICON, ALIASES, TASK_GENERIC, TASK_SEPARATOR, VERSION, clean, tokenize, task_name, task_prefixes, numbered_series
 from organizer.models import Vector
 from organizer.analysis import course_source
 from organizer.analysis.topics import TAG, activities, activity_relation, bilingual_topics, display, opaque_format
@@ -89,6 +89,9 @@ def compare(s,i,j,details=False):
         score=max(score,.92)
     scope=course_source.relation(a,b)
     activity=activity_relation(s.activities[i],s.activities[j])
+    series=s.series_ids[i] is not None and s.series_ids[i]==s.series_ids[j]
+    if series:
+        score=max(score,.93)
     if activity==1:
         score=max(score,.96)
     batch=False
@@ -105,11 +108,12 @@ def compare(s,i,j,details=False):
     elif scope==-1:score=min(score,.45)
     if activity<0 or (task_conflict(s,i,j) and scope!=1):score=min(score,.45)
     if different_term:score*=.55
-    if details:return dict(literal=lex,semantic=sem,string=char,context=context,sequence=seq,folder=same_dir,time=timing,source=host,source_page=source_page,version=version,course=scope,task=task,activity=activity==1,batch=batch)
+    if details:return dict(literal=lex,semantic=sem,string=char,context=context,sequence=seq,series=series,folder=same_dir,time=timing,source=host,source_page=source_page,version=version,course=scope,task=task,activity=activity==1,batch=batch)
     return round(100*score)
 
 def prepare(study):
     course_source.prepare(study.files)
+    study.series_ids=numbered_series(study.files)
     study.activities=activities(study.files)
     study.bilingual_topics=bilingual_topics(study.files)
     study.opaque_formats=[opaque_format(f.path.stem) for f in study.files]

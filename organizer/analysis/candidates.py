@@ -45,6 +45,14 @@ def assign_title(study,group,rules,read_covers=False):
         group.title_note=("형식이 같은 긴 식별자 · 기록된 다운로드 시각 차이 5분 이내" if recorded
                           else "형식이 같은 긴 식별자 · 같은 다운로드 사이트와 2분 이내의 파일 생성 시각")
         return
+    series={study.series_ids[f.index] for f in group.members}
+    if len(series)==1 and None not in series:
+        numbers=sorted({f.number for f in group.members})
+        label="주차" if group.members[0].pattern=="주차" else "회차"
+        group.title=f"{label}별 자료 ({numbers[0]}–{numbers[-1]}{label})"
+        group.title_kind="series"
+        group.title_note="파일명에서 회차가 이어지고 자료 구성이 반복됩니다."
+        return
     phrases={study.bilingual_topics[f.index] for f in group.members}
     if len(phrases)==1 and all(phrases):
         group.title=next(iter(phrases))

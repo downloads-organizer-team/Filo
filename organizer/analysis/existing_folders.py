@@ -186,7 +186,9 @@ def recommend(study, stop, status=lambda text:None, progress=None):
     status("추천 묶음과 기존 폴더 대조 중")
     for group in tracked(study.groups,progress):
         stop()
-        votes=[file_match(study,f,index,group.title) for f in group.members]
+        # A generated range such as "1–9주차" can recur in unrelated courses.
+        title="" if group.title_kind=="series" else group.title
+        votes=[file_match(study,f,index,title) for f in group.members]
         if votes and all(v and v[0]==votes[0][0] for v in votes):
             folder,_,reason=min(votes,key=lambda v:v[1])
             group.destination=folder
