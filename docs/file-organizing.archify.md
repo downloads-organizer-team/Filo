@@ -3,7 +3,7 @@
 **파일 정리하기**를 누르면 설정 창이 열립니다. **분석 시작**을 누르면 앱이 정리할 폴더와 파일을 제안합니다. **이동 경로 미리보기**에서 이동을 확정하면 앱이 파일을 옮깁니다.
 
 @answer scope="Windows 데스크톱 앱 · 선택한 원본 폴더" span=12
-@meta locale=ko style=editorial
+@meta locale=ko style=clean
 @source identity title="고유 파일과 사본 판정" path=eligibility.py lines=31:56
 @source engine title="파일 분석과 폴더 추천 순서" path=engine.py lines=19:62
 @source hash title="Python 3.13 · hashlib" url=https://docs.python.org/3.13/library/hashlib.html
@@ -16,20 +16,20 @@
 | role frontend | 사용자 조작 |
 | role backend | 앱 처리 |
 | role database | 디스크 변경 |
-| setup | 폴더 선택 | frontend |
+| setup | 파일 수집 | frontend |
 | identity | 사본 확인 | backend |
 | group | 묶음 추천 | backend |
 | preview | 경로 미리보기 | frontend |
 | move | 파일 이동 | database |
 | undo | 작업 복원 | database |
-| setup > identity | 분석 시작 |
-| identity > group | 대표 파일 |
-| group > preview | 파일 선택 |
-| preview > move | 이동 확정 |
-| move > undo | 복원 확정 |
+| setup > identity | |
+| identity > group | |
+| group > preview | |
+| preview > move | |
+| move > undo | |
 
 @steps id=steps
-| choose | 폴더 선택 | 정리할 위치를 선택하세요. 앱은 선택한 폴더 바로 아래의 파일을 읽습니다. | organize-flow | setup |
+| choose | 파일 수집 | 정리할 위치를 선택하세요. 앱은 선택한 폴더 바로 아래의 파일을 읽습니다. | organize-flow | setup |
 | compare | 사본 확인 | 앱은 파일 크기를 비교합니다. 크기가 같은 파일은 내용도 확인합니다. | organize-flow | identity |
 | recommend | 묶음 추천 | 앱은 파일명, 번호, 위치, 시각과 다운로드 출처를 비교합니다. 근거가 약한 파일은 미분류에 둡니다. | organize-flow | group |
 | inspect | 경로 미리보기 | 폴더 행을 펼치세요. 이동할 파일을 체크하세요. 미리보기에서 원래 경로와 목적지를 확인하세요. | organize-flow | preview |
@@ -73,6 +73,17 @@
 기존 폴더의 이름을 바꾸면 그 안의 파일 경로도 바뀝니다. 앱은 남은 복원 경로를 갱신합니다. 디스크에서 바꾼 이름은 최근 정리에서 되돌릴 수 있습니다.
 
 복원할 원래 경로에 다른 파일이 있으면 앱이 복원을 보류합니다. 이동한 파일의 내용이 바뀌거나 파일이 사라져도 복원을 보류합니다. 충돌을 해결한 뒤 같은 작업의 복원을 다시 실행하세요.
+
+## 구현 진입점 {#source}
+
+| 단계 | 함수 | 역할 |
+| --- | --- | --- |
+| 파일 수집 | `Desktop.scan()` | 선택한 원본 폴더의 바로 아래에서 파일을 수집합니다. |
+| 사본 확인 | `identify_files()` | 크기별 개수를 집계합니다. 같은 크기의 파일만 전부 읽습니다. |
+| 묶음 추천 | `discover_relations()` | 사본을 보류하고 이름, 시각, 위치, 출처로 관계를 계산합니다. |
+| 경로 미리보기 | `Desktop.preview()` | 선택한 파일을 다시 확인합니다. 이동 계획에 일회용 토큰을 붙입니다. |
+| 파일 이동 | `execute_moves()` | 이동 의도를 기록하고 목적지를 확인한 뒤 선택 파일을 옮깁니다. |
+| 작업 복원 | `storage.undo()` | 복원 가능한 파일을 역순으로 원래 경로에 옮깁니다. |
 
 ## Rust로 바꾸면 얼마나 빨라질까? {#speed}
 
