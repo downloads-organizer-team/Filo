@@ -51,6 +51,7 @@ def main():
     parser.add_argument("--electron", required=True, type=Path, help="Official Electron 45.3.3 Windows x64 ZIP")
     parser.add_argument("--python-embed", required=True, type=Path, help="Official Python 3.13.14 AMD64 embeddable ZIP")
     parser.add_argument("--iscc", default="ISCC.exe", help="Inno Setup 6 compiler path or command on PATH")
+    parser.add_argument("--rcedit", default="rcedit-x64.exe", help="Electron rcedit for the launcher icon and version information")
     parser.add_argument("--output", required=True, type=Path, help="Directory for the setup executable")
     args = parser.parse_args()
     output = args.output.resolve()
@@ -64,7 +65,12 @@ def main():
             raise ValueError(f"Expected a numeric release version, got {version}")
         runtime = stage / "runtime"
         unpack_runtime(args.electron, ELECTRON_SHA256, runtime)
-        (runtime / "electron.exe").rename(runtime / "organizer.exe")
+        executable = runtime / "organizer.exe"
+        (runtime / "electron.exe").rename(executable)
+        subprocess.run([args.rcedit, str(executable), "--set-icon", str(stage / "desktop/assets/downloads.ico"),
+                        "--set-version-string", "ProductName", package["productName"],
+                        "--set-version-string", "FileDescription", package["productName"],
+                        "--set-file-version", version, "--set-product-version", version], check=True)
         (runtime / "resources/default_app.asar").unlink()
         launcher = runtime / "resources/app"
         launcher.mkdir()
@@ -76,7 +82,7 @@ def main():
         (embedded / "python313._pth").write_text("python313.zip\n.\n..\n", encoding="ascii")
         subprocess.run([args.iscc, "/Qp", f"/DAppVersion={version}", f"/DStage={stage}", f"/O{output}",
                         str(ROOT / "packaging/windows.iss")], check=True)
-    installer = output / f"Downloads-Organizer-{version}-Setup-x64.exe"
+    installer = output / f"Filo-{version}-Setup-x64.exe"
     with installer.open("rb") as stream:
         print(f"{installer}\nSHA-256 {hashlib.file_digest(stream, 'sha256').hexdigest()}")
 

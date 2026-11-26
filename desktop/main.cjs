@@ -190,7 +190,7 @@ ipcMain.on("cancel-search",event=>{
 function createWindow() {
   startService();
   window=new BrowserWindow({width:1380,height:920,minWidth:870,minHeight:630,show:false,
-    title:"다운로드 정리",backgroundColor:windowColors().color,autoHideMenuBar:true,
+    title:"Filo",backgroundColor:windowColors().color,autoHideMenuBar:true,
     icon:path.join(__dirname,"assets","downloads.ico"),titleBarStyle:"hidden",
     titleBarOverlay:{...windowColors(),height:38},
     webPreferences:{preload:path.join(__dirname,"preload.cjs"),sandbox:true,contextIsolation:true,nodeIntegration:false}});
@@ -203,6 +203,15 @@ function createWindow() {
   });
   window.loadFile(path.join(__dirname,"index.html"));
 }
+// Keep preferences from installations that used the original Electron product name.
+if(!app.commandLine.hasSwitch("user-data-dir")){
+  const profile=path.join(app.getPath("appData"),"다운로드 정리");
+  if(existsSync(profile)){
+    app.setPath("userData",profile);
+    app.setPath("sessionData",profile);
+  }
+}
+app.setAppUserModelId("DownloadsOrganizer.Filo");
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on("second-instance",()=>{if(window){if(window.isMinimized())window.restore();window.focus();}});

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="170 55 456 152" width="456" height="152" fill="none">
+  <defs>
+
+    <linearGradient id="h_dark_tr_b0" gradientUnits="userSpaceOnUse" x1="150" y1="130" x2="395" y2="230"><stop offset="0%" stop-color="#F7F5FF"/><stop offset="100%" stop-color="#CBC0FF"/></linearGradient>
+    <linearGradient id="h_dark_tr_b1" gradientUnits="userSpaceOnUse" x1="390" y1="210" x2="250" y2="405"><stop offset="0%" stop-color="#A392FF"/><stop offset="100%" stop-color="#6955D8"/></linearGradient>
+    <linearGradient id="h_dark_tr_b2" gradientUnits="userSpaceOnUse" x1="230" y1="395" x2="130" y2="195"><stop offset="0%" stop-color="#745FE6"/><stop offset="100%" stop-color="#4632A8"/></linearGradient>
+    <linearGradient id="h_dark_tr_s0" gradientUnits="userSpaceOnUse" x1="157.85" y1="140.00" x2="191.85" y2="140.00"><stop offset="0%" stop-color="#4E39B8" stop-opacity="0.38"/><stop offset="100%" stop-color="#4E39B8" stop-opacity="0"/></linearGradient>
+    <linearGradient id="h_dark_tr_s1" gradientUnits="userSpaceOnUse" x1="405.53" y1="229.00" x2="388.53" y2="258.44"><stop offset="0%" stop-color="#2E1E7A" stop-opacity="0.42"/><stop offset="100%" stop-color="#2E1E7A" stop-opacity="0"/></linearGradient>
+    <linearGradient id="h_dark_tr_s2" gradientUnits="userSpaceOnUse" x1="204.62" y1="399.00" x2="187.62" y2="369.56"><stop offset="0%" stop-color="#1A1247" stop-opacity="0.48"/><stop offset="100%" stop-color="#1A1247" stop-opacity="0"/></linearGradient>
+    <mask id="h_dark_tr_m">
+      <path d="M 149.77 154.00 A 28.00 28.00 0 0 1 174.02 140.00 L 337.98 140.00 A 28.00 28.00 0 0 1 362.23 154.00 L 397.45 215.00 A 28.00 28.00 0 0 1 397.45 243.00 L 315.47 385.00 A 28.00 28.00 0 0 1 291.22 399.00 L 220.78 399.00 A 28.00 28.00 0 0 1 196.53 385.00 L 114.55 243.00 A 28.00 28.00 0 0 1 114.55 215.00 Z" fill="#FFFFFF"/>
+      <path d="M 217.89 244.00 A 10.00 10.00 0 0 1 226.56 229.00 L 285.44 229.00 A 10.00 10.00 0 0 1 294.11 244.00 L 264.66 295.00 A 10.00 10.00 0 0 1 247.34 295.00 Z" fill="#000000"/>
+    </mask>
+  </defs>
+  <g transform="translate(162.00, 45.00) scale(0.33203)">
+
+    <g transform="translate(256, 246) scale(1.28) translate(-256, -256)">
+      <g mask="url(#h_dark_tr_m)">
+        <path d="M 213.62 414.59 L 106.47 229.00 L 157.85 140.00 L 265.00 325.59 Z" fill="url(#h_dark_tr_b2)"/>
+        <path d="M 414.53 213.41 L 307.38 399.00 L 204.62 399.00 L 311.77 213.41 Z" fill="url(#h_dark_tr_b1)"/>
+        <path d="M 139.85 140.00 L 354.15 140.00 L 405.53 229.00 L 191.23 229.00 Z" fill="url(#h_dark_tr_b0)"/>
+        <path d="M 204.62 399.00 L 106.47 229.00 L 157.85 140.00 L 256.00 310.00 Z" fill="url(#h_dark_tr_b2)"/>
+        <path d="M 157.85 140.00 L 191.85 140.00 L 243.23 229.00 L 209.23 229.00 Z" fill="url(#h_dark_tr_s0)"/>
+        <path d="M 405.53 229.00 L 388.53 258.44 L 285.77 258.44 L 302.77 229.00 Z" fill="url(#h_dark_tr_s1)"/>
+        <path d="M 204.62 399.00 L 187.62 369.56 L 239.00 280.56 L 256.00 310.00 Z" fill="url(#h_dark_tr_s2)"/>
+        <line x1="157.85" y1="141.50" x2="354.15" y2="141.50" stroke="#FFFFFF" stroke-opacity="0.42" stroke-width="2"/>
+      </g>
+    </g>
+  </g>
+  <g transform="translate(348.00, 68.00)">
+    <g fill="#F5F4FC">
+      <path d="M 0.00 3.00 A 3.00 3.00 0 0 1 3.00 0.00 L 73.00 0.00 A 3.00 3.00 0 0 1 76.00 3.00 L 76.00 16.50 A 3.00 3.00 0 0 1 73.00 19.50 L 23.50 19.50 A 1.50 1.50 0 0 0 22.00 21.00 L 22.00 52.50 A 1.50 1.50 0 0 0 23.50 54.00 L 63.50 54.00 A 3.00 3.00 0 0 1 66.50 57.00 L 66.50 70.00 A 3.00 3.00 0 0 1 63.50 73.00 L 23.50 73.00 A 1.50 1.50 0 0 0 22.00 74.50 L 22.00 121.00 A 3.00 3.00 0 0 1 19.00 124.00 L 3.00 124.00 A 3.00 3.00 0 0 1 0.00 121.00 Z"/>
+      <rect x="90.0" y="32.0" width="21.5" height="92.0" rx="3.0"/>
+      <rect x="135.5" y="-3.0" width="21.5" height="127.0" rx="3.0"/>
+      <path d="M 221.50 29.50 A 45.50 48.50 0 1 1 221.50 126.50 A 45.50 48.50 0 1 1 221.50 29.50 Z M 221.50 48.50 A 24.00 29.50 0 1 0 221.50 107.50 A 24.00 29.50 0 1 0 221.50 48.50 Z" fill-rule="evenodd"/>
+    </g>
+    <circle cx="100.75" cy="9.5" r="12.2" fill="#F5F4FC"/>
+  </g>
+</svg>

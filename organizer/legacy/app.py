@@ -28,7 +28,7 @@ class App:
     def __init__(self, w):
         self.w = w
         self.scale = round(w.winfo_fpixels("1i"))/96
-        w.title("다운로드 정리")
+        w.title("Filo")
         w.configure(bg=BG)
         sw, sh = w.winfo_screenwidth(), w.winfo_screenheight()
         width, height = min(self.px(1280), sw-self.px(36)), min(self.px(850), sh-self.px(68))

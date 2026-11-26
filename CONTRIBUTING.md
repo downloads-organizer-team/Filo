@@ -63,10 +63,10 @@ python -B -m unittest -v
 
 ## Windows 설치 파일 빌드
 
-Windows x64에서 Python 3.13과 Inno Setup 6을 준비합니다. [Electron 45.3.3](https://github.com/electron/electron/releases/tag/v45.3.3)과 [Python 3.13.14](https://www.python.org/downloads/release/python-31314/)의 Windows x64 ZIP을 내려받고 저장소 루트에서 실행합니다.
+Windows x64에서 Python 3.13, Inno Setup 6, [Electron rcedit](https://github.com/electron/rcedit/releases/tag/v2.0.0)을 준비합니다. [Electron 45.3.3](https://github.com/electron/electron/releases/tag/v45.3.3)과 [Python 3.13.14](https://www.python.org/downloads/release/python-31314/)의 Windows x64 ZIP을 내려받고 저장소 루트에서 실행합니다.
 
 ```powershell
-python packaging/build_windows.py --electron electron-v45.3.3-win32-x64.zip --python-embed python-3.13.14-embed-amd64.zip --iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" --output dist
+python packaging/build_windows.py --electron electron-v45.3.3-win32-x64.zip --python-embed python-3.13.14-embed-amd64.zip --iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" --rcedit .\rcedit-x64.exe --output dist
 ```
 
 빌드 스크립트는 두 ZIP의 SHA-256을 확인합니다. 배포할 새 모듈과 리소스는 먼저 Git에 추가하세요. 설치 파일의 버전은 `desktop/package.json`에서 읽습니다.
