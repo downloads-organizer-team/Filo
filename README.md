@@ -7,13 +7,13 @@
 <p align="center">PC에서 파일을 찾고, 같은 작업에 쓴 자료를 한 폴더에 모으세요.</p>
 
 <p align="center">
-  <a href="https://github.com/downloads-organizer-team/downloads-organizer/releases/download/v1.2.1/Filo-1.2.1-Setup-x64.exe"><img src="https://img.shields.io/badge/Windows_x64_Setup-v1.2.1-6854D5?style=for-the-badge&amp;labelColor=343247" alt="Filo v1.2.1 Windows x64 설치 파일 받기"></a>
+  <a href="https://github.com/downloads-organizer-team/Filo/releases/download/v1.2.1/Filo-1.2.1-Setup-x64.exe"><img src="https://img.shields.io/badge/Windows_x64_Setup-v1.2.1-6854D5?style=for-the-badge&amp;labelColor=343247" alt="Filo v1.2.1 Windows x64 설치 파일 받기"></a>
 </p>
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
   <a href="docs/usage.md">사용 가이드</a> ·
   <a href="#앱-구조">앱 구조</a> ·
-  <a href="https://github.com/downloads-organizer-team/downloads-organizer/issues">이슈</a>
+  <a href="https://github.com/downloads-organizer-team/Filo/issues">이슈</a>
 </p>
 
 ![Filo에서 추천 묶음을 펼쳐 원래 폴더와 이동할 위치를 확인하는 화면](docs/review-workspace.png)

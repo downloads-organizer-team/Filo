@@ -18,7 +18,7 @@ README의 소스 실행 명령으로 여는 화면은 `desktop/`에 있습니다
 
 ## 이슈에서 작업 나누기
 
-1. [열린 이슈](https://github.com/downloads-organizer-team/downloads-organizer/issues)에서 같은 작업을 찾고, 맡을 항목에 담당자나 댓글을 남겨 중복 작업을 줄입니다.
+1. [열린 이슈](https://github.com/downloads-organizer-team/Filo/issues)에서 같은 작업을 찾고, 맡을 항목에 담당자나 댓글을 남겨 중복 작업을 줄입니다.
 2. 버그라면 **재현 순서, 기대 결과, 실제 결과**를 적습니다. 분류 오류는 예제 파일명과 분석 설정을 함께 적으면 따라 해 보기 쉽습니다. 예를 들어 “본문 분석을 켰을 때 `첨부.pdf`가 어느 그룹에 들어가는가?”처럼 결과를 비교할 수 있게 씁니다.
 3. 기능 제안이라면 **어느 화면에서 누가 무엇을 할 수 있어야 하는지** 적습니다. 화면과 분석 엔진을 나눠 맡는다면 두 작업이 주고받을 값과 함께 확인할 예제를 이슈에 남깁니다.
 
@@ -41,7 +41,7 @@ git commit -m "첫 실행 안내에 배포 ZIP 파일명 추가"
 git push -u origin docs/first-run-guide
 ```
 
-포크에서 작업한다면 원본 `main`과 포크를 동기화한 뒤 작업 브랜치를 자신의 포크에 푸시합니다. 두 방식 모두 PR의 대상은 **`downloads-organizer-team/downloads-organizer`의 `main`**입니다.
+포크에서 작업한다면 원본 `main`과 포크를 동기화한 뒤 작업 브랜치를 자신의 포크에 푸시합니다. 두 방식 모두 PR의 대상은 **`downloads-organizer-team/Filo`의 `main`**입니다.
 
 ## 변경 확인하기
 
@@ -73,7 +73,7 @@ python packaging/build_windows.py --electron electron-v45.3.3-win32-x64.zip --py
 
 ## 풀 리퀘스트와 리뷰
 
-[풀 리퀘스트](https://github.com/downloads-organizer-team/downloads-organizer/pulls)를 열 때는 제목에 사용자가 보게 될 변화를 쓰고, 본문에 아래 내용을 담아 주세요.
+[풀 리퀘스트](https://github.com/downloads-organizer-team/Filo/pulls)를 열 때는 제목에 사용자가 보게 될 변화를 쓰고, 본문에 아래 내용을 담아 주세요.
 
 | 항목 | 적을 내용 |
 | --- | --- |
