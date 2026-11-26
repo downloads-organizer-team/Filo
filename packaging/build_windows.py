@@ -36,10 +36,9 @@ def stage_application(stage):
         if not name:
             continue
         path = Path(name)
-        module = (len(path.parts) == 1 and path.suffix == ".py"
-                  and not name.startswith("test_") and name not in {"desktop_smoke.py", "ui_theme.py"})
+        module = path.parts[0] == "organizer" and path.parts[:2] != ("organizer", "legacy") and path.suffix == ".py"
         asset = path.parts[0] in {"desktop", "browser_extension", "vendor"} or name in {
-            "terms.json", "demo.zip", "icons/brand.png",
+            "organizer/analysis/terms.json", "capture_host.py", "demo.zip", "icons/brand.png",
         }
         if module or asset:
             target = stage / path

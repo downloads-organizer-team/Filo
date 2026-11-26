@@ -6,11 +6,11 @@
 
 | 변경할 내용 | 먼저 볼 파일 | 확인할 동작 |
 | --- | --- | --- |
-| 파일명·용어·그룹 추천 | [features.py](features.py), [terms.json](terms.json), [similarity.py](similarity.py), [clustering.py](clustering.py) | 같은 과목 자료가 묶이고, 이름이 비슷한 다른 과목은 따로 남는지 |
-| 문서 본문·과목명 추출 | [readers.py](readers.py), [refinement.py](refinement.py), [course_titles.py](course_titles.py) | 본문 분석 설정을 바꾸면 애매한 파일의 추천이 어떻게 달라지는지 |
-| 화면·데스크톱 서비스 | [desktop/renderer.js](desktop/renderer.js), [desktop/main.cjs](desktop/main.cjs), [desktop_service.py](desktop_service.py) | 화면에서 누른 동작이 Python 서비스까지 전달되고 결과가 표시되는지 |
-| 사용자 편집·파일 이동 | [feedback.py](feedback.py), [constraints.py](constraints.py), [storage.py](storage.py) | 수정한 소속이 재분석 후 유지되는지, 이동·복원 때 동명 파일을 보호하는지 |
-| 브라우저 출처 | [browser_extension/](browser_extension/), [browser_bridge.py](browser_bridge.py), [capture_host.py](capture_host.py), [course_source.py](course_source.py) | 다운로드한 파일에 해당 페이지의 제목·경로가 붙는지 |
+| 파일명·용어·그룹 추천 | [features.py](organizer/analysis/features.py), [terms.json](organizer/analysis/terms.json), [similarity.py](organizer/analysis/similarity.py), [clustering.py](organizer/analysis/clustering.py) | 같은 과목 자료가 묶이고, 이름이 비슷한 다른 과목은 따로 남는지 |
+| 문서 본문·과목명 추출 | [readers.py](organizer/analysis/readers.py), [refinement.py](organizer/analysis/refinement.py), [course_titles.py](organizer/analysis/course_titles.py) | 본문 분석 설정을 바꾸면 애매한 파일의 추천이 어떻게 달라지는지 |
+| 화면·데스크톱 서비스 | [desktop/renderer.js](desktop/renderer.js), [desktop/main.cjs](desktop/main.cjs), [desktop_service.py](organizer/desktop_service.py) | 화면에서 누른 동작이 Python 서비스까지 전달되고 결과가 표시되는지 |
+| 사용자 편집·파일 이동 | [feedback.py](organizer/files/feedback.py), [constraints.py](organizer/analysis/constraints.py), [storage.py](organizer/files/storage.py) | 수정한 소속이 재분석 후 유지되는지, 이동·복원 때 동명 파일을 보호하는지 |
+| 브라우저 출처 | [browser_extension/](browser_extension/), [browser_bridge.py](organizer/browser/browser_bridge.py), [capture_host.py](organizer/browser/capture_host.py), [course_source.py](organizer/analysis/course_source.py) | 다운로드한 파일에 해당 페이지의 제목·경로가 붙는지 |
 
 전체 처리 순서와 신뢰도 기준은 [분석 설계](docs/analysis.md)에서 볼 수 있습니다.
 
@@ -53,11 +53,11 @@ python -B -m unittest -v
 
 | 변경 범위 | 집중해서 확인하는 방법 |
 | --- | --- |
-| 분류 규칙·문서 판독 | `python -B -m unittest -v test_pipeline`을 실행합니다. 예제에서 함께 묶여야 할 파일과 미분류에 남아야 할 파일을 하나씩 비교합니다. |
-| 특정 폴더에 치우치는 분류 | `python -B -X utf8 test_generalization.py --measure`로 합성 파일의 잘못 묶인 쌍, 놓친 쌍, 예상 이름과 일치한 묶음 수를 확인합니다. `python -B -m unittest test_generalization`은 파일명·단어 순서·배치가 다른 경우도 검사합니다. |
-| 편집·미리보기·이동 | `python -B -m unittest -v test_desktop`을 실행합니다. 이동을 건너뛴 파일과 되돌린 파일의 경로를 확인하는 사례는 `test_pipeline`에도 있습니다. |
-| 복수 폴더·목적지·검토 데이터 | `python -B -m unittest -v test_sources`로 경로 중복, 충돌, 새 폴더·기존 폴더 이동과 복원, 제한된 관계 보기와 실제 정리 이력을 확인합니다. |
-| 범용 관계·검색 | `python -B -m unittest -v test_relationships test_search`를 실행합니다. Windows에서 `python -B -X utf8 test_search.py --sdk`를 실행하면 임시 폴더를 대상으로 내장 검색 엔진을 확인합니다. |
+| 분류 규칙·문서 판독 | `python -B -m unittest -v tests.test_pipeline`을 실행합니다. 예제에서 함께 묶여야 할 파일과 미분류에 남아야 할 파일을 하나씩 비교합니다. |
+| 특정 폴더에 치우치는 분류 | `python -B -X utf8 -m tests.test_generalization --measure`로 합성 파일의 잘못 묶인 쌍, 놓친 쌍, 예상 이름과 일치한 묶음 수를 확인합니다. `python -B -m unittest tests.test_generalization`은 파일명·단어 순서·배치가 다른 경우도 검사합니다. |
+| 편집·미리보기·이동 | `python -B -m unittest -v tests.test_desktop`을 실행합니다. 이동을 건너뛴 파일과 되돌린 파일의 경로를 확인하는 사례는 `test_pipeline`에도 있습니다. |
+| 복수 폴더·목적지·검토 데이터 | `python -B -m unittest -v tests.test_sources`로 경로 중복, 충돌, 새 폴더·기존 폴더 이동과 복원, 제한된 관계 보기와 실제 정리 이력을 확인합니다. |
+| 범용 관계·검색 | `python -B -m unittest -v tests.test_relationships tests.test_search`를 실행합니다. Windows에서 `python -B -X utf8 -m tests.test_search --sdk`를 실행하면 임시 폴더를 대상으로 내장 검색 엔진을 확인합니다. |
 | Electron 화면·브라우저 확장 | Windows에서 바꾼 화면이나 연결 과정을 직접 따라갑니다. 파일 이동을 확인할 때는 예제 파일의 복사본으로 한 그룹만 옮기고 **최근 이동 되돌리기**까지 확인합니다. |
 | 문서 | GitHub 미리보기에서 표와 코드 블록을 읽고, 바꾼 링크와 실행 절차를 따라갑니다. |
 

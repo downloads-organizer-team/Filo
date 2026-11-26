@@ -25,7 +25,7 @@ let window, child, sequence=0, mutating=false;
 function startService() {
   const packaged = path.join(root,"python","python.exe");
   const process = spawn(existsSync(packaged) ? packaged : "python.exe",
-    ["-B","-X","utf8","-u",path.join(root,"desktop_service.py")],
+    ["-B","-X","utf8","-u","-m","organizer.desktop_service"],
     {cwd:root, windowsHide:true, stdio:["pipe","pipe","pipe"]});
   child=process;
   let errorText="";

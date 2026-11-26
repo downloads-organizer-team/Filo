@@ -102,11 +102,12 @@ npx.cmd --yes electron@45.3.3 ./desktop
 
 | 위치 | 역할 |
 | --- | --- |
-| [desktop/](desktop/) · [desktop_service.py](desktop_service.py) | Electron 화면과 Python 서비스 사이에서 파일 상세, 유사도 행렬, 이동 미리보기를 연결합니다. |
-| [engine.py](engine.py) · [terms.json](terms.json) · [readers.py](readers.py) | 파일명과 한·영 용어를 비교하고 필요한 문서만 일부 읽어 그룹을 추천합니다. |
-| [feedback.py](feedback.py) · [constraints.py](constraints.py) · [storage.py](storage.py) | 사용자가 정한 소속과 파일 관계를 저장하고 파일 이동과 복원을 처리합니다. |
-| [browser_extension/](browser_extension/) · [capture_host.py](capture_host.py) | 선택적으로 Edge·Chrome에서 받은 파일과 다운로드 페이지를 연결합니다. |
-| [file_search.py](file_search.py) · [vendor/](vendor/) | Everything SDK 연결과 실시간 파일명 검색을 담당합니다. |
-| [test_pipeline.py](test_pipeline.py) · [test_desktop.py](test_desktop.py) | 예제 파일로 분류 결과, 그룹 편집, 파일 이동과 복원을 검증합니다. |
+| [desktop/](desktop/) · [desktop_service.py](organizer/desktop_service.py) | Electron 화면과 Python 서비스 사이에서 파일 상세, 유사도 행렬, 이동 미리보기를 연결합니다. |
+| [organizer/analysis/](organizer/analysis/) | 사본을 확인하고 파일명·메타데이터·문서 단서로 묶음을 추천합니다. |
+| [organizer/files/](organizer/files/) | 파일을 수집하고 사용자 선택, 파일 이동, 이름 변경과 복원 기록을 관리합니다. |
+| [organizer/search/](organizer/search/) · [vendor/](vendor/) | Everything 엔진과 SDK를 연결해 파일명을 검색합니다. |
+| [organizer/browser/](organizer/browser/) · [browser_extension/](browser_extension/) | Edge·Chrome에서 받은 파일과 다운로드 페이지를 연결합니다. |
+| [tests/](tests/) | 분석 결과, 파일 이동과 복원, 검색, 데스크톱 화면을 검증합니다. |
+| [packaging/](packaging/) | Windows 설치 파일을 빌드합니다. |
 
 추천 점수의 기준과 지원 문서 형식은 [분석 설계](docs/analysis.md)에, 작업 브랜치·테스트 명령·PR 작성 예시는 [기여 가이드](CONTRIBUTING.md)에 있습니다.

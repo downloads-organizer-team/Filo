@@ -4,8 +4,8 @@
 
 @answer scope="v1.2.0 · Windows x64 · 선택한 원본 폴더" span=12
 @meta locale=ko style=clean
-@source identity title="고유 파일과 사본 판정" path=eligibility.py lines=31:54
-@source engine title="파일 분석과 폴더 추천 순서" path=engine.py lines=21:103
+@source identity title="고유 파일과 사본 판정" path=organizer/analysis/eligibility.py lines=39:80
+@source engine title="파일 분석과 폴더 추천 순서" path=organizer/analysis/engine.py lines=22:106
 @source hash title="Python 3.13 · hashlib" url=https://docs.python.org/3.13/library/hashlib.html
 @source archify title="도식 제작 · Archify" url=https://github.com/tt-a1i/archify
 @source writing title="문장 작성 참고 · ASD-STE100 Issue 9" url=https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf

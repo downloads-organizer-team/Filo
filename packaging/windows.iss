@@ -41,4 +41,4 @@ Name: "{group}\{#AppName}"; Filename: "{app}\runtime\organizer.exe"; WorkingDir:
 Filename: "{app}\runtime\organizer.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; WorkingDir: "{app}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
-Filename: "{app}\python\python.exe"; Parameters: "-B -X utf8 ""{app}\browser_bridge.py"" --unregister"; WorkingDir: "{app}"; Flags: runhidden skipifdoesntexist; RunOnceId: "UnregisterBrowserBridge"
+Filename: "{app}\python\python.exe"; Parameters: "-B -X utf8 -m organizer.browser.browser_bridge --unregister"; WorkingDir: "{app}"; Flags: runhidden skipifdoesntexist; RunOnceId: "UnregisterBrowserBridge"

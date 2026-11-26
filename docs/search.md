@@ -53,16 +53,16 @@ v1.2.0 설치 로그에서 `vendor/everything/License.txt`와 `vendor/Everything
 
 ```powershell
 python -B -X utf8 -m unittest discover -v
-python -B -X utf8 test_search.py --sdk
-python -B -X utf8 test_search.py --sdk ".\vendor\everything\Everything.exe"
-python -B test_relationships.py --benchmark
+python -B -X utf8 -m tests.test_search --sdk
+python -B -X utf8 -m tests.test_search --sdk ".\vendor\everything\Everything.exe"
+python -B -m tests.test_relationships --benchmark
 ```
 
 첫 명령은 분류, 이동, 복원과 검색을 검증합니다. `--sdk`는 임시 폴더에서 내장 엔진을 실행해 한글 이름을 검색합니다. 실행 파일 경로를 함께 주면 별도 이름을 지정한 테스트 인스턴스에 SDK로 연결합니다. 개발 중 검색 범위를 좁히려면 `MOA_SEARCH_ROOTS`에 폴더의 절대 경로를 지정하세요. 여러 경로는 세미콜론으로 구분합니다.
 
 측정은 파일 수, 파일명 구성, 본문 분석 여부, 실행 환경과 결과 묶음을 함께 기록합니다. 합성 자료의 실행 시간을 모든 실제 폴더의 성능으로 일반화하지 않습니다.
 
-Windows에서는 `python desktop_smoke.py "Electron 실행 파일 경로"`로 실제 화면을 검증합니다. 이 테스트는 저장소에 포함된 엔진을 별도 인스턴스로 시작해 자동 재시도, 폴더 아이콘, 행 높이, 이름으로 열기, 선택 이동과 복원을 확인합니다.
+Windows에서는 `python -m tests.desktop_smoke "Electron 실행 파일 경로"`로 실제 화면을 검증합니다. 이 테스트는 저장소에 포함된 엔진을 별도 인스턴스로 시작해 자동 재시도, 폴더 아이콘, 행 높이, 이름으로 열기, 선택 이동과 복원을 확인합니다.
 
 ### v1.2.0 기본 검색 범위 실측
 
