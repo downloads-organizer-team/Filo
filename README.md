@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/downloads-organizer-team/downloads-organizer/releases/download/v1.0.0/downloads-organizer-windows-x64.zip"><img src="https://img.shields.io/badge/Download_for_Windows_x64-v1.0.0-6854D5?style=for-the-badge&amp;labelColor=343247" alt="Windows x64용 ZIP 다운로드 (v1.0.0)"></a>
+  <a href="https://github.com/downloads-organizer-team/downloads-organizer/releases/download/v1.1.0/downloads-organizer-windows-x64.zip"><img src="https://img.shields.io/badge/Download_for_Windows_x64-v1.1.0-6854D5?style=for-the-badge&amp;labelColor=343247" alt="Windows x64용 ZIP 다운로드 (v1.1.0)"></a>
 </p>
 
 <p align="center">
@@ -20,9 +20,9 @@
   <a href="https://github.com/downloads-organizer-team/downloads-organizer/issues">이슈</a>
 </p>
 
-![묶음과 파일 목록 옆에 관련 파일명과 숫자가 들어간 색상 원을 표시하는 최신 관계 보기 화면.](docs/review-workspace.png)
+![파일 정리 화면에서 추천 폴더를 펼쳐 파일의 원래 위치와 이동할 위치를 확인하는 모습](docs/review-workspace.png)
 
-<p align="center"><sub>여행 준비 예제 · 파일 행 끝의 정보 버튼에서 관련 파일과 추천 근거를 확인할 수 있습니다.</sub></p>
+<p align="center"><sub>폴더별로 이동할 파일을 선택하고, 아래에서 선택한 개수와 이동 경로를 확인할 수 있습니다.</sub></p>
 
 <details>
 <summary><strong>목차</strong></summary>
@@ -38,7 +38,7 @@
 
 ## 빠른 시작
 
-1. **검색** — 이 브랜치의 `start.cmd`를 열고 파일이나 폴더 이름을 입력하세요. 입력하거나 지울 때마다 이름과 경로 목록이 갱신됩니다. 위 v1.0.0 ZIP은 이전 배포본입니다.
+1. **검색** — 위의 Windows x64용 ZIP을 내려받아 압축을 풀고 `start.cmd`를 실행하세요. 파일이나 폴더 이름을 입력하면 검색 결과에 이름과 경로가 표시됩니다.
 2. **정리 시작** — **파일 정리하기**에서 폴더를 선택합니다. 기본 다운로드 폴더도 제외할 수 있습니다. 기본값인 **관련 작업별**은 파일명과 다운로드 단서를 비교합니다. **확장자별**을 선택하면 PDF, EXE처럼 마지막 확장자가 같은 파일을 모읍니다. 관련 작업별 최소 신뢰도는 0.0부터 1.0까지 0.1 단위로 조절합니다. 기본값은 0.7입니다.
 3. **기존 폴더 활용 또는 새 폴더로만 정리** — 두 방식 모두 선택한 경로 바로 아래의 파일만 이동 후보로 삼습니다. 기존 폴더 활용은 폴더 이름과 바로 안의 파일명으로 목적지를 추천합니다. 새 폴더 이름이 이미 사용 중이면 번호를 붙입니다.
 4. **검토하고 이동** — **분석 시작**을 누른 뒤 화면 상단에서 선택 경로를 확인하세요. 폴더 행을 펼치면 추천 근거와 파일별 원래 경로·예상 경로가 나타납니다. 여러 폴더를 동시에 펼칠 수 있습니다. 이동 가능한 추천 파일은 처음에 모두 선택됩니다. 폴더 체크를 해제하면 그 폴더를 한 번에 제외합니다. 하단에서 선택한 폴더 수와 파일 수를 확인하고 **파일 이동**을 누르세요. 경로를 먼저 보려면 **이동 경로 미리보기**를 누르세요. 새 묶음은 기본적으로 첫 선택 경로 아래에 생깁니다.
