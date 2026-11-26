@@ -23,20 +23,41 @@ def check_source(file):
         raise OSError("분석 후 파일이 바뀌었습니다.")
 
 
-def checksum(path):
+def checksum(path, on_chunk=None):
     with open(path, "rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        if on_chunk is None:
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+        digest = hashlib.sha256()
+        block = bytearray(1024 * 1024)
+        view = memoryview(block)
+        while size := stream.readinto(block):
+            digest.update(view[:size])
+            on_chunk(size)
+        return digest.hexdigest()
 
 
-def identify_files(files, stop):
+def identify_files(files, stop, progress=None):
     sizes = Counter(f.size for f in files)
     representatives = {}
+    # Files with unique sizes only need a readability check. Equal sizes need a full hash.
+    total = sum(max(1, size) * count if count > 1 else 1 for size, count in sizes.items())
+    done = 0
+    if progress:
+        progress(0, total)
     # Prefer the unnumbered original, then the path, independently of scan order.
     def order(f):
         return (bool(re.search(r"\s*\(\d+\)$", f.path.stem)), str(f.path).casefold(), str(f.path))
 
+    def on_chunk(size):
+        nonlocal read_bytes
+        stop()
+        read_bytes += size
+        progress(done + min(read_bytes, work - 1), total)
+
     for f in sorted(files, key=order):
         stop()
+        work = max(1, f.size) if sizes[f.size] > 1 else 1
+        read_bytes = 0
         try:
             check_source(f)
             if f.offline:
@@ -44,14 +65,19 @@ def identify_files(files, stop):
             if sizes[f.size] == 1:
                 with f.path.open("rb") as stream:
                     stream.read(1)
-                continue
-            f.digest = checksum(f.path)
-            check_source(f)
-            rep = representatives.setdefault((f.size, f.digest), f)
-            if rep is not f:
-                f.hold_reason = "동일 내용의 사본 · 대표 파일 " + str(rep.path)
+            else:
+                f.digest = checksum(f.path, on_chunk) if progress and work > 1024 * 1024 else checksum(f.path)
+                check_source(f)
+                rep = representatives.setdefault((f.size, f.digest), f)
+                if rep is not f:
+                    f.hold_reason = "동일 내용의 사본 · 대표 파일 " + str(rep.path)
+        except InterruptedError:
+            raise
         except OSError as error:
             f.hold_reason = "내용 확인 보류 · " + str(error)
+        done += work
+        if progress:
+            progress(done, total)
 
 
 def eligible_groups(study, plan):

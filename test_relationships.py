@@ -41,8 +41,8 @@ class RelationshipTests(unittest.TestCase):
 
     def analyze(self,deep=False,metadata=None):
         original=scanner.scan
-        def scan(study,recursive,stop):
-            original(study,recursive,stop)
+        def scan(study,recursive,stop,progress=None):
+            original(study,recursive,stop,progress)
             if metadata:
                 for f in study.files:metadata(f)
         with patch("engine.scan",side_effect=scan):
@@ -228,7 +228,7 @@ def benchmark():
                 if actual!=expected:raise AssertionError((count,len(actual),len(expected)))
                 print(json.dumps(dict(files=count,pairs=count*(count-1)//2,seconds=round(elapsed,6),
                                       matrix_seconds=round(sum(v for k,v in stages.items() if k.startswith("유사도 행렬")),6),
-                                      clustering_seconds=stages.get("완전 연결 계층 클러스터링 중"),
+                                      clustering_seconds=sum(stages.get(k,0) for k in ("군집 간 거리 계산 중","계층 군집화 중")),
                                       groups=len(actual),exact_groups=actual==expected)),flush=True)
 
 

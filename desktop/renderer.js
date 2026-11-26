@@ -31,7 +31,23 @@ function fileBadge(ext){
 }
 
 function toast(text){clearTimeout(toastTimer);$("#toast").textContent=text;$("#toast").hidden=false;toastTimer=setTimeout(()=>$("#toast").hidden=true,3200);}
-function status(text,canCancel=false){const el=$("#status");el.hidden=!text;el.innerHTML=esc(text)+(canCancel?'<button data-action="cancel">분석 취소</button>':"");}
+function status(message, scanning=false){
+  const label=typeof message==="string"?message:message.label;
+  $("#status").hidden=!label;
+  if($("#status-label").textContent!==label)$("#status-label").textContent=label;
+  $(".scan-meter").hidden=!scanning;
+  $("#scan-elapsed").hidden=!scanning;
+  $('#status [data-action="cancel"]').hidden=!scanning;
+  if(!scanning)return;
+  const bar=$("#scan-progress"),value=$("#scan-value");
+  if(Number.isInteger(message.percent)){
+    bar.value=message.percent;
+    value.textContent=message.percent+"%";
+  }else{
+    bar.removeAttribute("value");
+    value.textContent=Number.isInteger(message.files)?message.files.toLocaleString("ko-KR")+"개":"";
+  }
+}
 function setBusy(value){
   busy=value;document.querySelector('[data-action="scan"]').disabled=value;updateReviewBar();
   document.querySelectorAll("[data-folder-check],[data-check],#all-check").forEach(box=>box.disabled=value);
@@ -62,6 +78,14 @@ function visibleFiles(){
 async function scan(newOptions=options,openReview=true){
   if(busy)return;
   scanBusy=true;setBusy(true);status("선택한 폴더 분석 중",true);
+  const started=performance.now();
+  function showElapsed(){
+    const seconds=Math.floor((performance.now()-started)/1000);
+    const minutes=Math.floor(seconds/60);
+    $("#scan-elapsed").textContent=(minutes?minutes+"분 ":"")+seconds%60+"초 경과";
+  }
+  showElapsed();
+  const elapsedTimer=setInterval(showElapsed,1000);
   try {
     data=await call("scan",{...options,...newOptions});options={...options,...data.options,roots:data.roots||data.options?.roots||options.roots};
     groups=new Map(data.groups.map(g=>[g.id,g]));files=new Map(data.files.map(f=>[f.id,f]));
@@ -88,7 +112,7 @@ async function scan(newOptions=options,openReview=true){
     layoutKey="";expanded.clear();scope=null;
     activeId=null;detailInfo=null;detailVersion++;detailOpen=false;pair=null;mxRow=0;mxCol=0;status("");render();
   } catch(e){status(e.message);if(!data)$("#content").innerHTML='<div class="panel empty">분석 폴더를 확인하거나 다른 폴더를 추가한 뒤 다시 분석하세요.</div>'; }
-  finally{scanBusy=false;setBusy(false);renderSources();}
+  finally{clearInterval(elapsedTimer);scanBusy=false;setBusy(false);renderSources();}
 }
 const confidenceDescriptions=[
   "공통 주제 단서가 조금만 있어도 묶습니다.", "약한 단서가 있는 후보까지 넓게 봅니다.",
@@ -782,7 +806,9 @@ document.addEventListener("keydown",e=>{
 });
 $("#group-search").oninput=e=>{groupQuery=e.target.value;nav();};
 compactDetails.addEventListener("change",syncInspector);
-window.desktop.status(t=>{if(busy)status(t,scanBusy);});
+window.desktop.status(message=>{
+  if(scanBusy||busy&&typeof message==="string")status(message,scanBusy);
+});
 $("#dialog").addEventListener("cancel",()=>{searchVersion++;dialogAction=null;});
 $("#external-query").oninput=liveSearch;
 call("doubleClickTime").then(value=>{doubleClickMs=value;}).catch(()=>{});

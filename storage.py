@@ -178,7 +178,7 @@ def check_group_paths(root, source, target, roots=None, mode="new"):
             raise OSError("그룹 폴더 위치에 파일 또는 연결 경로가 있습니다.")
 
 
-def plan_group_folders(study, selected=None, destination=None, mode="new", *, file_ids=None):
+def plan_group_folders(study, selected=None, destination=None, mode="new", *, file_ids=None, progress=None):
     if mode not in ("new","existing","reuse"):raise ValueError("대상 폴더 방식을 확인하세요.")
     if mode=="existing" and destination is None:raise ValueError("대상 폴더를 선택하세요.")
     destination=check_directory(Path(destination) if destination is not None else study.root)
@@ -186,6 +186,10 @@ def plan_group_folders(study, selected=None, destination=None, mode="new", *, fi
     plan = []
     names = set()
     reserved = set()
+    if progress:
+        total = sum(1 for g in study.groups if selected is None or g is selected
+                    for f in g.members if file_ids is None or f.index in file_ids)
+        progress(0, total)
     for group in sorted(study.groups, key=lambda g: (g.title.casefold(), g.gid)):
         base = folder_name(group.title)
         name = base
@@ -226,6 +230,8 @@ def plan_group_folders(study, selected=None, destination=None, mode="new", *, fi
             except (OSError, RuntimeError) as error:
                 skip = str(error)
             plan.append(FolderMove(file, target, skip, roots, parent, move_mode, folder_id))
+            if progress:
+                progress(len(plan), total)
     return apply_minimum(plan)
 
 

@@ -18,7 +18,7 @@ def check_directory(path):
     return path
 
 
-def scan(study, recursive, stop):
+def scan(study, recursive, stop, progress=None):
     roots = study.roots or [study.root]
     for root in roots:check_directory(root)
     pending = sorted(roots, key=lambda p: str(p).casefold(), reverse=True)
@@ -55,6 +55,8 @@ def scan(study, recursive, stop):
                             study.files.append(File(path, uid, rel, st.st_size,
                                 getattr(st, "st_birthtime", st.st_ctime), st.st_mtime, st.st_mtime_ns,
                                 bool(attrs & stat.FILE_ATTRIBUTE_OFFLINE)))
+                            if progress:
+                                progress(len(study.files), None)
                     except OSError:
                         study.skipped += 1
         except InterruptedError:

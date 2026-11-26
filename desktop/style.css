@@ -98,3 +98,14 @@ dialog{width:min(530px,90vw);max-height:84vh;padding:0;border:1px solid #e7e5ee;
 #group-by{display:block;width:100%;margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:6px;background:white;color:inherit;font:inherit}
 .extension-review .advanced,.extension-review .selection-actions,.extension-review .detail-tabs{display:none}
 @media(max-width:550px){.review-bar{flex-wrap:wrap}.review-bar>div{flex:1 0 100%}.review-bar strong,.review-bar span{max-width:none}}
+.scan-meter{display:flex;align-items:center;gap:8px;flex:1;min-width:50px;max-width:260px}
+#scan-progress{appearance:none;overflow:hidden;flex:1;min-width:12px;height:5px;border:0;border-radius:4px;background:#d5d0e8;color:var(--purple)}
+#scan-progress::-webkit-progress-bar{background:#d5d0e8}
+#scan-progress::-webkit-progress-value{border-radius:4px;background:var(--purple)}
+#scan-progress:indeterminate::-webkit-progress-bar{background:linear-gradient(90deg,transparent,var(--purple),transparent) no-repeat,#d5d0e8;background-size:50% 100%;animation:scan-pulse 1.6s ease-in-out infinite alternate}
+@keyframes scan-pulse{from{background-position:0% center}to{background-position:100% center}}
+@media(prefers-reduced-motion:reduce){#scan-progress:indeterminate::-webkit-progress-bar{animation:none;background-position:center}}
+#scan-value,#scan-elapsed{font-variant-numeric:tabular-nums;white-space:nowrap}
+#scan-value{min-width:4ch;text-align:right;font-weight:650}
+#scan-elapsed{margin-left:auto;color:var(--muted)}
+#status:has(.scan-meter:not([hidden])){justify-content:flex-start}

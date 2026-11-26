@@ -27,7 +27,15 @@
       <div class="actions"><button class="btn" data-action="scan" hidden><i aria-hidden="true" class="ph ph-arrows-clockwise"></i>다시 분석</button><button class="btn primary" data-action="sources"><i aria-hidden="true" class="ph ph-folder-open"></i><span id="setup-label">파일 정리하기</span></button></div>
     </header>
     <details id="root-path" hidden><summary></summary><ul></ul></details>
-    <div id="status" hidden role="status"></div>
+    <div id="status" hidden>
+      <span id="status-label" role="status"></span>
+      <div class="scan-meter" hidden>
+        <progress id="scan-progress" max="100" aria-labelledby="status-label"></progress>
+        <span id="scan-value" aria-hidden="true"></span>
+      </div>
+      <span id="scan-elapsed" hidden></span>
+      <button data-action="cancel" hidden>분석 취소</button>
+    </div>
     <section id="search-home" aria-label="내 PC 파일 검색">
       <label class="live-query"><i aria-hidden="true" class="ph ph-magnifying-glass"></i><input id="external-query" type="search" maxlength="200" autofocus autocomplete="off" placeholder="파일이나 폴더 이름 검색" aria-label="파일이나 폴더 이름 검색"><kbd>Ctrl K</kbd></label>
       <div class="search-list"><div id="search-meta" role="status">파일·폴더 이름 검색</div><div class="table-scroll"><table><thead><tr><th scope="col">이름</th><th scope="col">경로</th></tr></thead><tbody id="search-rows"></tbody></table><p id="search-empty" class="empty" role="status">이름을 입력하면 파일과 폴더가 여기에 표시됩니다.</p></div></div>

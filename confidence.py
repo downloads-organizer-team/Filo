@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from candidates import cohesion
 from course_source import relation as course_relation
 from models import Group
+from scan_progress import tracked
 
 @dataclass
 class Ranking:
@@ -39,12 +40,12 @@ def rank(study,f,groups,rules):
     conf=.44*best+.20*nearest+.18*core+.18*min(1,margin/.30)
     return Ranking(g,best,margin,nearest,core,conf)
 
-def detect(study,groups,rules):
+def detect(study,groups,rules,progress=None):
     from readers import SUPPORTED
     for g in groups:g.cohesion=cohesion(study.matrix,g.members)
     owners={m.index:g for g in groups for m in g.members}
     anchors=[m for g in groups for m in g.members]
-    for f in study.files:
+    for f in tracked(study.files,progress):
         if f.hold_reason:
             f.note=f.hold_reason
             continue

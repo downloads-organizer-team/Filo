@@ -13,6 +13,7 @@ from features import SERIES, VERSION, YEAR, task_name, tokenize, zone_transfer
 from models import Group
 from similarity import dot, source_page_key, vector
 from scanner import check_directory
+from scan_progress import tracked
 from topics import NOISE, REFERENCE, activity_relation, opaque_format, project_title, reference_key, words
 
 YEAR_LABEL = re.compile(YEAR.pattern+r"(?:학년도|년도|년)?")
@@ -176,12 +177,14 @@ def folder_score(source,folder,label_keys,example_keys):
     return score," · ".join(evidence)
 
 
-def recommend(study, stop):
+def recommend(study, stop, status=lambda text:None, progress=None):
+    status("기존 폴더 확인 중")
     index = folder_index(study.roots,study.idf,stop)
     if not index[0]:
         return
     by_folder = defaultdict(list)
-    for group in study.groups:
+    status("추천 묶음과 기존 폴더 대조 중")
+    for group in tracked(study.groups,progress):
         stop()
         votes=[file_match(study,f,index,group.title) for f in group.members]
         if votes and all(v and v[0]==votes[0][0] for v in votes):
@@ -190,7 +193,8 @@ def recommend(study, stop):
             group.destination_reason=reason
             group.title_note+=" · "+reason+" 일치 · 기존 폴더 "+str(folder)
             by_folder[folder].append(group)
-    for f in study.files:
+    status("개별 파일과 기존 폴더 대조 중")
+    for f in tracked(study.files,progress):
         stop()
         if f.group or f.hold_reason or f.index in study.rules.fixed or study.opaque_formats[f.index]:
             continue

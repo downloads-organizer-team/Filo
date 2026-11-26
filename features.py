@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from models import DownloadContext
 from course_source import hint as course_hint
+from scan_progress import tracked
 
 LEXICON = json.loads(Path(__file__).with_name("terms.json").read_text(encoding="utf-8"))
 ROLES = set("과제 실습 강의 보고서 기말 중간 제출물 프로젝트 발표 제안서 회의록 견적 예산 자료 요약 결과 참고 사진 안내 파일 첨부 정리 기록 노트 메모 실험 설명서 lab lecture report project assignment homework final notes note draft slides proposal budget".split())
@@ -118,6 +119,6 @@ def download_context(f):
                 return
     except (OSError,ValueError):pass
 
-def extract(files,stop):
-    for f in files:
+def extract(files,stop,progress=None):
+    for f in tracked(files,progress):
         stop();filename(f);download_context(f)

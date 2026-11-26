@@ -3,10 +3,12 @@ from confidence import rank
 from matrix import update
 from readers import read,SUPPORTED
 from similarity import content_vector
+from scan_progress import tracked
 
-def refine(study,rules,stop):
-    if not study.deep or not study.groups:return
-    for i in sorted(study.medium):
+def refine(study,rules,stop,status=lambda text:None,progress=None):
+    if not study.deep or not study.groups or not study.medium:return
+    status("문서 일부 확인 중")
+    for i in tracked(sorted(study.medium),progress):
         stop();f=study.files[i]
         if f.ext not in SUPPORTED:
             f.excerpt_status="본문 미지원 형식";continue
@@ -16,10 +18,13 @@ def refine(study,rules,stop):
             study.tried+=1
             v=content_vector(study,text)
             if v.literal or v.context:study.extras[i]=v
-    update(study,stop)
+    if study.extras:
+        status("문서 유사도 갱신 중")
+        update(study,stop,progress)
     # Freeze confident anchors. Competing ambiguous files cannot promote one another.
     plans=[]
-    for i in study.medium:
+    status("문서 확인 결과 반영 중")
+    for i in tracked(study.medium,progress):
         stop();f=study.files[i];r=rank(study,f,study.groups,rules)
         f.confidence=r.confidence;f.evidence=r.describe()
         if i in study.extras and r.qualifies(study.min_confidence):plans.append((r.confidence,i,r.group))

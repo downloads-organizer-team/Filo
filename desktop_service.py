@@ -10,6 +10,7 @@ from typing import Literal, overload
 from uuid import uuid4
 
 import engine
+from scan_progress import ScanProgress
 import feedback
 import storage
 import entry_names
@@ -33,6 +34,10 @@ def group_reason(group):
     if kind in {"filename","activity"} or group.title_note.startswith(("모든 파일 이름","파일명에 반복된")):
         return "파일명 · "+group.title
     return group.title_note.split(" · 기존 폴더 ")[0]
+
+
+def layout_rows(plan):
+    return [dict(id=p.file.index,mode=p.mode,target=str(p.target),skip=p.skip) for p in plan]
 
 
 class Desktop:
@@ -76,8 +81,15 @@ class Desktop:
         group_by=args.get("groupBy",settings["groupBy"])
         if group_by not in ("related","extension"):raise ValueError("묶는 기준을 확인하세요.")
         settings.update(minConfidence=minimum,folderMode=mode,groupBy=group_by)
-        study=engine.analyze(settings["roots"][0],False,settings["deep"],check,self.status,
+        reporter=ScanProgress(self.status)
+        def progress(done,total):
+            check()
+            reporter.update(done,total)
+        study=engine.analyze(settings["roots"][0],False,settings["deep"],check,reporter.stage,progress=progress,
                              course_covers=settings["covers"],roots=settings["roots"],min_confidence=minimum,folder_mode=mode,group_by=group_by)
+        reporter.stage("정리 목록 준비 중")
+        layout=layout_rows(storage.plan_group_folders(study,mode=mode,progress=progress))
+        check()
         storage.remember_options(False,settings["deep"],settings["covers"],settings["roots"],minimum,mode,group_by)
         self.study=study
         self.folder_ids={}
@@ -95,7 +107,7 @@ class Desktop:
                          confidence=g.confidence,count=len(g.members))
                 for g in study.groups]
         return ScanResult(root=str(study.root),roots=list(map(str,study.roots)),files=files,groups=groups,options=settings,
-                    layout=self.review({}),
+                    layout=layout,
                     generation=self.generation,time=datetime.now().strftime("%H:%M"),
                     elapsed=study.ms,medium=len(study.medium),attempted=len(study.attempted),
                     rescued=study.rescued,covers=sum(f.course_cover_checked for f in study.files))
@@ -225,8 +237,7 @@ class Desktop:
                                           args.get("destinationMode",self.study.folder_mode),file_ids=ids)
 
     def review(self,args):
-        return [dict(id=p.file.index,mode=p.mode,target=str(p.target),skip=p.skip)
-                for p in self.organize_plan(args)]
+        return layout_rows(self.organize_plan(args))
 
     def preview(self,args) -> MovePreview:
         kind=args.get("kind","organize");token=uuid4().hex
