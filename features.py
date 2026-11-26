@@ -94,12 +94,20 @@ def task_prefixes(files):
         prefixes.append(prefix)
     return [p if p and len(tails[p])>=2 else "" for p in prefixes]
 
-def download_context(f):
-    if os.name!="nt" or f.offline:return
+def zone_transfer(path):
+    if os.name!="nt":return {}
     try:
-        with open(str(f.path)+":Zone.Identifier","rb") as stream:data=stream.read(32768)
+        with open(str(path)+":Zone.Identifier","rb") as stream:data=stream.read(32768)
         enc="utf-16" if data.startswith((b"\xff\xfe",b"\xfe\xff")) else "utf-8-sig"
-        values=dict(line.split("=",1) for line in data.decode(enc,errors="replace").splitlines() if "=" in line)
+        return dict(line.split("=",1) for line in data.decode(enc,errors="replace").splitlines() if "=" in line)
+    except (OSError,ValueError):return {}
+
+
+def download_context(f):
+    if f.offline:return
+    values=zone_transfer(f.path)
+    if not values:return
+    try:
         f.referrer_hint=course_hint(values.get("ReferrerUrl",""))
         for field in ("HostUrl","ReferrerUrl"):
             url=values.get(field,"");uri=urlsplit(url)

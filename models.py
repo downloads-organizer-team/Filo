@@ -79,6 +79,7 @@ class Group:
     title_note: str = ""
     title_kind: str = "topic"
     destination: Path | None = None
+    destination_reason: str = ""
 
 
 @dataclass

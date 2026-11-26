@@ -22,6 +22,8 @@ import file_search
 
 def group_reason(group):
     kind=group.title_kind
+    if group.destination_reason and group.destination:
+        return group.destination_reason+" · "+group.destination.name
     if kind=="extension":return "확장자 · "+group.members[0].ext.upper()
     if kind=="batch":return "다운로드 시각 · "+group.title
     if kind=="manual":return "직접 지정 · "+group.title

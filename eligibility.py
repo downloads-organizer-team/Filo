@@ -56,9 +56,11 @@ def identify_files(files, stop):
 
 def eligible_groups(study, plan):
     reasons = {item.file: item.skip for item in plan}
+    # Multiple logical groups can share one physical destination in the review tree.
+    active_folders = {item.target.parent for item in plan if item.mode=="existing" and not item.skip}
     kept = []
     for group in study.groups:
-        if group.destination or any(not reasons[f] for f in group.members):
+        if group.destination in active_folders or any(not reasons[f] for f in group.members):
             kept.append(group)
             continue
         for f in group.members:

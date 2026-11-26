@@ -169,6 +169,65 @@ class WorkflowTests(unittest.TestCase):
         self.create("보관 A/달빛정원_이전 견적.pdf","보관 B/달빛정원_이전 자료.pdf","달빛정원_추가 견적.pdf")
         self.assertFalse(self.scan("reuse")["groups"])
 
+    def test_archive_history_distinguishes_annual_and_multi_year_folders(self):
+        self.create("봄축제/2025 무대.pdf","2026 봄축제 프로젝트_음향.txt","2026 봄축제 프로젝트_무대.xlsx","2026 봄축제 프로젝트_포스터.png")
+        rows=self.scan("reuse")["layout"]
+        self.assertEqual(len(rows),3)
+        self.assertTrue(all(r["mode"]=="new" for r in rows))
+        self.create("봄축제/2024 진행표.pdf")
+        rows=self.scan("reuse")["layout"]
+        self.assertEqual(len(rows),3)
+        self.assertTrue(all(r["mode"]=="existing" and Path(r["target"]).parent.name=="봄축제" for r in rows))
+        (self.root/"봄축제").rename(self.root/"2025 봄축제")
+        rows=self.scan("reuse")["layout"]
+        self.assertEqual([r["mode"] for r in rows],["new"]*3)
+
+    def test_existing_folder_compares_saved_names_beyond_exact_prefixes(self):
+        self.create("현장 자료/Copper Orchard map.txt","현장 자료/Orchard Copper brief.txt","Orchard Copper budget.txt")
+        result=self.scan("reuse")
+        self.assertEqual([g["reason"] for g in result["groups"]],["보관 파일명 · 현장 자료"])
+        self.assertEqual(Path(result["layout"][0]["target"]).parent,self.root/"현장 자료")
+
+    def test_shared_terms_do_not_override_a_distinct_project_or_semester(self):
+        self.create("현장/Quartz Harbor North map.txt","현장/North Harbor Quartz brief.txt",
+                    "Quartz Harbor South budget.txt","소리학교/소리학교 1학기 지침.txt","소리학교 2학기_신청서.txt")
+        self.assertFalse(self.scan("reuse")["layout"])
+
+    def test_reuse_shows_only_destinations_with_pending_changes(self):
+        self.create("달빛정원/달빛정원_견적.txt","달빛정원_견적.txt","보관함/옛 문서.txt")
+        result=self.scan("reuse")
+        self.assertFalse(result["groups"])
+        self.assertFalse(result["layout"])
+        self.assertIn("같은 이름",result["files"][0]["note"])
+        self.create("달빛정원_시안.png")
+        result=self.scan("reuse")
+        self.assertEqual([Path(r["target"]).name for r in result["layout"] if not r["skip"]],["달빛정원_시안.png"])
+
+    def test_repeated_archived_project_can_contradict_the_folder_name(self):
+        self.create("청솔/물망초_예산.txt","청솔/물망초_배치도.pdf","청솔_시안.png")
+        self.assertFalse(self.scan("reuse")["groups"])
+
+    def test_two_roots_with_identical_labels_need_corroboration(self):
+        extra=self.root.parent/"Other"
+        self.create("청솔/숲 안내.txt","청솔_무대 배치.pdf")
+        (extra/"청솔").mkdir(parents=True)
+        (extra/"청솔"/"청솔_음향.txt").touch()
+        result=self.app.scan(dict(roots=list(map(str,[self.root,extra])),deep=False,covers=False,folderMode="reuse"))
+        row,=result["layout"]
+        self.assertEqual(Path(row["target"]).parent,extra/"청솔")
+        self.assertIn("폴더명 · 보관 파일명",result["groups"][0]["reason"])
+
+    def test_full_source_page_corroborates_a_weak_name_but_host_alone_does_not(self):
+        self.create("도란/보관 자료.txt","무대 도란 지도.pdf")
+        incoming="https://campus.example/assignments/42"
+        def verify(archived):
+            with patch("features.zone_transfer",return_value={"ReferrerUrl":incoming}), \
+                 patch("existing_folders.zone_transfer",return_value={"ReferrerUrl":archived}):
+                return self.scan("reuse")
+        self.assertFalse(verify("https://campus.example/assignments/43")["groups"])
+        result=verify(incoming)
+        self.assertEqual([g["reason"] for g in result["groups"]],["폴더명 · 다운로드 출처 · 도란"])
+
     def test_word_inside_filename_does_not_match_a_sample_project_prefix(self):
         self.create("실습 정리/XSS_워크숍.md","대회 증빙 자료 XSS 보고서.pdf")
         self.assertFalse(self.scan("reuse")["groups"])
