@@ -178,8 +178,8 @@ function liveSearch(){
   window.desktop.cancelSearch();
   const empty=$("#search-empty"),meta=$("#search-meta");
   $("#search-rows").replaceChildren();empty.hidden=false;
-  meta.textContent="검색 범위 · Everything 색인";
-  empty.textContent=query?"Everything 검색 중…":"이름을 입력하면 파일과 폴더가 여기에 표시됩니다.";
+  meta.textContent="파일·폴더 이름 검색";
+  empty.textContent=query?"검색 중…":"이름을 입력하면 파일과 폴더가 여기에 표시됩니다.";
   if(!query)return;
   let retryDelay=250;
   async function run(){
@@ -197,7 +197,7 @@ function liveSearch(){
       if(version!==liveVersion)return;
       empty.textContent=e.message;
       if(e.code==="everythingUnavailable"){
-        meta.textContent="Everything 연결 대기 · 자동 재시도";
+        meta.textContent="검색 준비 중 · 자동 재시도";
         searchTimer=setTimeout(run,retryDelay);
         retryDelay=Math.min(retryDelay*2,2000);
       }

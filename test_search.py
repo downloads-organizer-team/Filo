@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import file_search
+import search_engine
 
 
 class SearchTests(unittest.TestCase):
@@ -46,27 +47,78 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(query.call_count,2)
             client.close()
 
-    def test_start_only_one_registered_installation_on_disconnect(self):
-        worker=file_search.SearchWorker()
-        worker.process=Mock()
-        exe=Path("C:/Program Files/Everything/Everything.exe")
-        with patch.dict(os.environ),patch("file_search.installed_everything",return_value=exe),patch("file_search.subprocess.Popen") as launch:
-            os.environ.pop("MOA_EVERYTHING_INSTANCE",None)
-            for status in ("loading","offline","offline"):
-                worker.replies.put((status,"waiting"))
-                with self.assertRaises(file_search.EverythingUnavailable):
-                    worker.request(None)
-                if status=="loading":launch.assert_not_called()
-            self.assertEqual(launch.call_args.args[0],[str(exe),"-startup"])
-            launch.assert_called_once()
+    def test_missing_bundled_engine_reports_reinstall(self):
+        with patch.dict(os.environ), patch.object(search_engine, "ENGINE", self.root / "absent.exe"):
+            os.environ.pop("MOA_EVERYTHING_INSTANCE", None)
+            worker = file_search.SearchWorker()
+            worker.process = Mock()
+            worker.replies.put(("offline", "waiting"))
+            with self.assertRaisesRegex(FileNotFoundError, "다시 설치"):
+                worker.request(None)
 
-    def test_custom_instance_is_not_replaced_with_default_installation(self):
-        worker=file_search.SearchWorker()
-        worker.process=Mock()
-        worker.replies.put(("offline","waiting"))
-        with patch.dict(os.environ,MOA_EVERYTHING_INSTANCE="test-instance"),patch("file_search.installed_everything") as locate:
+    def test_explicit_instance_is_externally_managed(self):
+        with patch.dict(os.environ,MOA_EVERYTHING_INSTANCE="test-instance"),patch("file_search.BundledEngine") as engine:
+            worker=file_search.SearchWorker()
+            worker.process=Mock()
+            worker.replies.put(("offline","waiting"))
             with self.assertRaises(file_search.EverythingUnavailable):worker.request(None)
-            locate.assert_not_called()
+            engine.assert_not_called()
+
+    @unittest.skipUnless(os.name == "nt", "Windows x64 integration")
+    def test_bundled_engine_finds_korean_names_and_reopens_its_index(self):
+        self.extra.mkdir()
+        self.downloads.mkdir()
+        other = self.root / "두 번째 폴더"
+        other.mkdir()
+        stem = "색인 확인 [42]"
+        sample = self.extra / (stem + ".txt")
+        folder = other / (stem + ".folder")
+        sample.touch()
+        folder.mkdir()
+        (self.downloads / (stem + ".outside")).touch()
+        state = self.root / "state"
+        roots = os.pathsep.join(map(str, (self.extra, other)))
+        def await_results(worker, expected):
+            deadline = perf_counter() + 20
+            while perf_counter() < deadline:
+                try:
+                    result = worker.request(stem)
+                    found = {Path(r["path"]): r["isFolder"] for r in result["results"]}
+                    if found == expected and result["total"] == len(expected):
+                        self.assertEqual(result["backend"], "내장 Everything")
+                        return
+                except file_search.EverythingUnavailable:
+                    pass
+                sleep(.12)
+            self.fail("내장 검색 색인이 테스트 파일의 현재 상태와 일치하지 않습니다.")
+
+        with patch.dict(os.environ, MOA_SEARCH_ROOTS=roots, MOA_HOME=str(state)), \
+                patch.object(search_engine.storage, "HOME", state):
+            os.environ.pop("MOA_EVERYTHING_INSTANCE", None)
+            expected = {sample: False, folder: True}
+            for run in range(2):
+                worker = file_search.SearchWorker()
+                try:
+                    await_results(worker, expected)
+                    if run == 0:
+                        new_file = other / (stem + ".새파일")
+                        new_file.touch()
+                        await_results(worker, {**expected, new_file: False})
+                        new_file.unlink()
+                        await_results(worker, expected)
+                        # A subsequent query reopens a crashed private indexer.
+                        worker.engine.process.kill()
+                        worker.engine.process.wait()
+                        await_results(worker, expected)
+                    process = worker.engine.process
+                    self.assertIsNone(process.poll())
+                finally:
+                    worker.close()
+                self.assertIsNotNone(process.poll())
+                self.assertGreater((state / "Search" / "Everything.db").stat().st_size, 0)
+                if run == 0:
+                    renamed = sample.rename(self.extra / (stem + ".바뀐이름"))
+                    expected = {renamed: False, folder: True}
 
     def test_cancelled_search_does_not_start_process(self):
         worker=file_search.SearchWorker()
@@ -96,8 +148,8 @@ class SearchTests(unittest.TestCase):
             self.assertTrue(capped["truncated"])
             self.assertEqual(capped["total"],410)
 
-def verify_live_sdk(query="Everything.exe",expected=None):
-    """Opt-in real IPC proof: python -B -X utf8 test_search.py --sdk."""
+def verify_live_sdk(query,expected):
+    """Query an isolated real index through the same stdin protocol as Electron."""
     with TemporaryDirectory(prefix="moa-sdk-") as temporary:
         environment=dict(os.environ,MOA_HOME=temporary,MOA_DOWNLOADS=temporary)
         with subprocess.Popen(
@@ -122,12 +174,13 @@ def verify_live_sdk(query="Everything.exe",expected=None):
                     assert response.get("code")=="everythingUnavailable" and perf_counter()-started<20,response
                     sleep(.25)
                 result=response["value"]
-                assert result["backend"]=="Everything 1.5 SDK",result
+                expected_backend = "Everything 1.5 SDK" if "MOA_EVERYTHING_INSTANCE" in environment else "내장 Everything"
+                assert result["backend"] == expected_backend,result
                 assert result["total"]>=len(result["results"])
                 assert len({r["path"] for r in result["results"]})==len(result["results"])
                 matches=[Path(r["path"]) for r in result["results"] if r["name"].casefold()==query.casefold()]
-                assert any(p.is_file() and (expected is None or p==expected) for p in matches),result
-                print(json.dumps(dict(scenario="live SDK through open-stdin desktop IPC",
+                assert expected in matches and expected.is_file(),result
+                print(json.dumps(dict(scenario="isolated search through desktop IPC",
                                       backend=result["backend"],attempts=attempts,elapsed_ms=result["elapsed"],
                                       total_ms=round((perf_counter()-started)*1000),passed=True)))
             finally:
@@ -153,6 +206,17 @@ def isolated_instance(executable,base,inbox,name):
             except (subprocess.TimeoutExpired,subprocess.CalledProcessError):
                 proc.terminate()
                 proc.wait(timeout=5)
+
+
+def verify_bundled_sdk():
+    with TemporaryDirectory(prefix="organizer-search-") as temporary:
+        inbox = Path(temporary) / "받은 파일"
+        inbox.mkdir()
+        sample = inbox / "검색 확인 [42].txt"
+        sample.touch()
+        with patch.dict(os.environ, MOA_SEARCH_ROOTS=str(inbox)):
+            os.environ.pop("MOA_EVERYTHING_INSTANCE", None)
+            verify_live_sdk(sample.name, sample)
 
 
 def verify_isolated_sdk(executable):
@@ -188,6 +252,6 @@ def verify_isolated_sdk(executable):
 
 
 if __name__=="__main__":
-    if sys.argv[1:]==["--sdk"]:verify_live_sdk()
+    if sys.argv[1:]==["--sdk"]:verify_bundled_sdk()
     elif len(sys.argv)==3 and sys.argv[1]=="--sdk":verify_isolated_sdk(sys.argv[2])
     else:unittest.main()

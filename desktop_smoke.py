@@ -311,4 +311,4 @@ def verify(executable,everything):
 
 
 if __name__=="__main__":
-    verify(sys.argv[1],sys.argv[2] if len(sys.argv)>2 else str(Path(os.environ["ProgramFiles"])/"Everything"/"Everything.exe"))
+    verify(sys.argv[1],sys.argv[2] if len(sys.argv)>2 else Path(__file__).parent/"vendor"/"everything"/"Everything.exe")

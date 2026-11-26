@@ -57,9 +57,19 @@ python -B -m unittest -v
 | 특정 폴더에 치우치는 분류 | `python -B -X utf8 test_generalization.py --measure`로 합성 파일의 잘못 묶인 쌍, 놓친 쌍, 예상 이름과 일치한 묶음 수를 확인합니다. `python -B -m unittest test_generalization`은 파일명·단어 순서·배치가 다른 경우도 검사합니다. |
 | 편집·미리보기·이동 | `python -B -m unittest -v test_desktop`을 실행합니다. 이동을 건너뛴 파일과 되돌린 파일의 경로를 확인하는 사례는 `test_pipeline`에도 있습니다. |
 | 복수 폴더·목적지·검토 데이터 | `python -B -m unittest -v test_sources`로 경로 중복, 충돌, 새 폴더·기존 폴더 이동과 복원, 제한된 관계 보기와 실제 정리 이력을 확인합니다. |
-| 범용 관계·검색 | `python -B -m unittest -v test_relationships test_search`를 실행합니다. 실행 중인 Everything 1.5와 실제 IPC 연결은 `python -B -X utf8 test_search.py --sdk`로 별도 확인합니다. |
+| 범용 관계·검색 | `python -B -m unittest -v test_relationships test_search`를 실행합니다. Windows에서 `python -B -X utf8 test_search.py --sdk`를 실행하면 임시 폴더를 대상으로 내장 검색 엔진을 확인합니다. |
 | Electron 화면·브라우저 확장 | Windows에서 바꾼 화면이나 연결 과정을 직접 따라갑니다. 파일 이동을 확인할 때는 예제 파일의 복사본으로 한 그룹만 옮기고 **최근 이동 되돌리기**까지 확인합니다. |
 | 문서 | GitHub 미리보기에서 표와 코드 블록을 읽고, 바꾼 링크와 실행 절차를 따라갑니다. |
+
+## Windows 설치 파일 빌드
+
+Windows x64에서 Python 3.13과 Inno Setup 6을 준비합니다. [Electron 45.3.3](https://github.com/electron/electron/releases/tag/v45.3.3)과 [Python 3.13.14](https://www.python.org/downloads/release/python-31314/)의 Windows x64 ZIP을 내려받고 저장소 루트에서 실행합니다.
+
+```powershell
+python packaging/build_windows.py --electron electron-v45.3.3-win32-x64.zip --python-embed python-3.13.14-embed-amd64.zip --iscc "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" --output dist
+```
+
+빌드 스크립트는 두 ZIP의 SHA-256을 확인합니다. 배포할 새 모듈과 리소스는 먼저 Git에 추가하세요. 설치 파일의 버전은 `desktop/package.json`에서 읽습니다.
 
 ## 풀 리퀘스트와 리뷰
 

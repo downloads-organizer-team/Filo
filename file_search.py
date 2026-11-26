@@ -9,11 +9,13 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import TypedDict
 
+from search_engine import BundledEngine, private_instance
+
 LIMIT = 200
-CONNECT_MESSAGE = "Everything 1.5 연결을 기다리고 있습니다. 설치된 Everything이 실행 중인지 확인하세요."
+CONNECT_MESSAGE = "검색 엔진을 시작하고 있습니다. 준비되면 자동으로 검색합니다."
 
 
 class SearchFile(TypedDict):
@@ -129,29 +131,6 @@ def query_client(sdk,client,query):
             sdk.Everything3_DestroySearchState(state)
 
 
-def installed_everything():
-    """Look up a registered 1.5 installation without searching any drives."""
-    if os.name != "nt":
-        return None
-    import winreg
-    uninstall = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-    for hive in (winreg.HKEY_LOCAL_MACHINE,winreg.HKEY_CURRENT_USER):
-        for view in (winreg.KEY_WOW64_64KEY,winreg.KEY_WOW64_32KEY):
-            for key in ("Everything","Everything 1.5a"):
-                try:
-                    with winreg.OpenKey(hive,uninstall+"\\"+key,0,winreg.KEY_READ|view) as entry:
-                        version=winreg.QueryValueEx(entry,"DisplayVersion")[0]
-                        folder=Path(winreg.QueryValueEx(entry,"InstallLocation")[0])
-                    if not str(version).startswith("1.5.") or not folder.is_absolute():
-                        continue
-                    for name in ("Everything.exe","Everything64.exe","Everything32.exe"):
-                        if (folder/name).is_file():
-                            return folder/name
-                except OSError:
-                    continue
-    return None
-
-
 class SdkClient:
     def __init__(self):
         self.sdk=None
@@ -165,12 +144,10 @@ class SdkClient:
                 self.sdk=load_sdk()
             except (OSError,AttributeError) as exc:
                 raise SdkMissing("Everything 검색 SDK를 불러올 수 없습니다. 앱의 vendor 폴더와 x64 DLL을 확인하세요.") from exc
-        instances=[os.environ["MOA_EVERYTHING_INSTANCE"]] if "MOA_EVERYTHING_INSTANCE" in os.environ else ["","1.5a"]
-        for instance in instances:
-            self.client=self.sdk.Everything3_ConnectW(instance)
-            if self.client:
-                return
-        raise EverythingUnavailable(CONNECT_MESSAGE)
+        instance = os.environ.get("MOA_EVERYTHING_INSTANCE")
+        self.client = self.sdk.Everything3_ConnectW(private_instance() if instance is None else instance)
+        if not self.client:
+            raise EverythingUnavailable(CONNECT_MESSAGE)
 
     def close(self):
         if self.client:
@@ -182,7 +159,7 @@ class SdkClient:
         self.connect()
         if not self.sdk.Everything3_IsDBLoaded(self.client):
             self.close()
-            raise IndexLoading("Everything 색인을 준비하고 있습니다. 준비되면 자동으로 검색합니다.")
+            raise IndexLoading("파일 이름 색인을 준비하고 있습니다. 첫 실행에는 시간이 걸릴 수 있습니다.")
         try:
             return query_client(self.sdk,self.client,query)
         except OSError as exc:
@@ -231,9 +208,9 @@ class SearchWorker:
     def __init__(self):
         self.process=None
         self.replies=Queue()
-        self.launch_attempted=False
+        self.engine = None if "MOA_EVERYTHING_INSTANCE" in os.environ else BundledEngine()
 
-    def close(self):
+    def close_client(self):
         if self.process:
             try:
                 self.process.stdin.close()
@@ -245,6 +222,11 @@ class SearchWorker:
                 self.process.kill()
                 self.process.wait()
             self.process=None
+
+    def close(self):
+        self.close_client()
+        if self.engine is not None:
+            self.engine.close()
 
     def request(self,query,stop: Callable[[],None]=lambda:None):
         stop()
@@ -273,7 +255,7 @@ class SearchWorker:
                 raise EOFError()
             status,value=reply
         except (OSError,EOFError) as exc:
-            self.close()
+            self.close_client()
             if isinstance(exc,InterruptedError):
                 raise
             raise EverythingUnavailable(CONNECT_MESSAGE) from exc
@@ -282,18 +264,14 @@ class SearchWorker:
         if status=="loading":
             raise IndexLoading(value)
         if status=="offline":
-            if not self.launch_attempted and "MOA_EVERYTHING_INSTANCE" not in os.environ:
-                self.launch_attempted=True
-                if exe:=installed_everything():
-                    try:
-                        subprocess.Popen([str(exe),"-startup"],cwd=exe.parent,stdin=subprocess.DEVNULL,
-                                         stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-                    except OSError:
-                        pass
+            if self.engine is not None:
+                self.engine.start()
             raise EverythingUnavailable(value)
         stop()
         if value is not None:
             value["elapsed"]=round((perf_counter()-start)*1000)
+            if self.engine is not None:
+                value["backend"] = "내장 Everything"
         return value
 
 
@@ -301,7 +279,14 @@ def search(query: str | None) -> SearchResult:
     query=validate_query(query)
     worker=SearchWorker()
     try:
-        return worker.request(query)
+        deadline = perf_counter() + 20
+        while True:
+            try:
+                return worker.request(query)
+            except EverythingUnavailable:
+                if perf_counter() >= deadline:
+                    raise
+                sleep(.2)
     finally:
         worker.close()
 
@@ -311,7 +296,7 @@ if __name__=="__main__":
         serve_sdk()
         sys.exit(0)
     try:
-        print(json.dumps(sdk_search(sys.argv[1]),ensure_ascii=False))
+        print(json.dumps(search(sys.argv[1]),ensure_ascii=False))
     except OSError as error:
         print(str(error),file=sys.stderr)
         sys.exit(1)
