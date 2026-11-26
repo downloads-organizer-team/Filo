@@ -13,7 +13,7 @@ const palettes=[
   ["#e7f0f2","#cde0e3","#779fa7","#9dc7ce","#81b6be","#426e78","#80aeb6"]
 ];
 const colors=g=>{const p=palettes[Math.max(0,data?.groups.indexOf(g)??0)%palettes.length];return ["wash","rim","back","front","fold","ink","dot"].map((k,i)=>"--"+k+":"+p[i]).join(";");};
-const titles={search:"파일 검색",review:"파일 검토",matrix:"유사도 행렬",flow:"분석 과정"};
+const titles={search:"파일 검색",review:"파일 정리",matrix:"유사도 행렬",flow:"분석 과정"};
 let data=null,groups=new Map(),files=new Map(),view="search",scope=null,query="",groupQuery="";
 let selected=new Set(),busy=false,scanBusy=false,renderId=0,toastTimer,dialogAction=null;
 let mxRow=0,mxCol=0,pair=null,options={recursive:false,deep:true,covers:true,roots:[],folderMode:"reuse",minConfidence:0.7};
@@ -21,6 +21,8 @@ let sourceDraft=null,searchVersion=0,liveVersion=0,searchTimer,retryOnReturn=fal
 let activeId=null,detailInfo=null,detailVersion=0,detailOpen=false,detailTab="evidence",relatedRows=null,relatedBusy=false,relatedError="";
 const compactDetails=window.matchMedia("(max-width:1199px)");
 const expanded = new Set();
+let reviewIcons={},folderEditor=null,pickedKey="",renameTimer,doubleClickMs=500;
+let shownSearchRows=[],searchBackend="",searchTotal=0;
 let folderBranches = new Map(), originalLayout = new Map(), layout = new Map(), layoutKey = "", layoutReady = false;
 function bytes(n){if(n<1024)return n+" B";if(n<1048576)return Math.round(n/1024)+" KB";return (n/1048576).toFixed(1)+" MB";}
 function fileBadge(ext){
@@ -73,6 +75,15 @@ async function scan(newOptions=options,openReview=true){
       folderBranches.set(gid,destinations.get(path));
     }
     selected=new Set(data.layout.filter(row=>!row.skip).map(row=>row.id));
+    reviewIcons={};
+    const scanned=data;
+    call("reviewIcons").then(icons=>{
+      if(data!==scanned)return;
+      reviewIcons=icons;
+      for(const slot of document.querySelectorAll("[data-review-ext]")){
+        if(icons[slot.dataset.reviewExt])slot.outerHTML=reviewIcon(slot.dataset.reviewExt);
+      }
+    }).catch(()=>{});
     layoutKey="";expanded.clear();scope=null;
     activeId=null;detailInfo=null;detailVersion++;detailOpen=false;pair=null;mxRow=0;mxCol=0;status("");render();
   } catch(e){status(e.message);if(!data)$("#content").innerHTML='<div class="panel empty">분석 폴더를 확인하거나 다른 폴더를 추가한 뒤 다시 분석하세요.</div>'; }
@@ -134,7 +145,23 @@ async function showFileIcons(version){
     slot.replaceWith(img);
   }
 }
+function paintSearchRows(){
+  const shown=shownSearchRows.length.toLocaleString("ko-KR");
+  const count=searchTotal!==shownSearchRows.length?"색인 "+searchTotal.toLocaleString("ko-KR")+"건 · "+shown+"개 표시":"전체 "+shown+"개";
+  $("#search-meta").textContent=searchBackend+" · "+count;
+  $("#search-empty").hidden=shownSearchRows.length>0;
+  $("#search-empty").textContent="일치하는 파일이나 폴더가 없습니다.";
+  $("#search-rows").innerHTML=shownSearchRows.map(r=>{
+    const glyph=r.isFolder?'<i class="result-folder" aria-hidden="true"></i>':
+      '<i class="ph ph-file shell-icon" data-file-icon="'+esc(r.id)+'" aria-hidden="true"></i>';
+    return '<tr><td><button class="search-name" data-entry="search" data-id="'+esc(r.id)+'" data-open-result="'+esc(r.id)+'" aria-label="'+esc(r.name)+(r.isFolder?' 폴더 열기':' 파일 열기')+'">'+
+      glyph+'<span class="entry-text" title="'+esc(r.name)+'">'+esc(r.name)+'</span></button></td><td><div class="search-path"><span title="'+esc(r.path)+'">'+esc(r.path)+'</span>'+
+      '<button class="icon-btn" data-copy-path="'+esc(r.path)+'" title="경로 복사" aria-label="'+esc(r.name)+' 경로 복사">'+icon("copy")+'</button></div></td></tr>';
+  }).join("");
+  markSelection();
+}
 function liveSearch(){
+  shownSearchRows=[];searchBackend="";clearTimeout(renameTimer);
   clearTimeout(searchTimer);
   retryOnReturn=false;
   const version=++liveVersion,query=$("#external-query").value.trim();
@@ -151,16 +178,10 @@ function liveSearch(){
     try{
       const result=await call("search",{query});
       if(version!==liveVersion)return;
-      const shown=result.results.length.toLocaleString("ko-KR");
-      const count=result.total!==result.results.length?"색인 "+result.total.toLocaleString("ko-KR")+"건 · "+shown+"개 표시":"전체 "+shown+"개";
-      meta.textContent=result.backend+" · "+count;
-      $("#search-rows").innerHTML=result.results.map(r=>{
-        const glyph=r.isFolder?'<i class="result-folder" aria-hidden="true"></i>':
-          '<i class="ph ph-file shell-icon" data-file-icon="'+esc(r.id)+'" aria-hidden="true"></i>';
-        return '<tr><td><button class="search-name" data-open-result="'+esc(r.id)+'" title="'+esc(r.name)+'" aria-label="'+esc(r.name)+(r.isFolder?' 폴더 열기':' 파일 열기')+'">'+glyph+'<span>'+esc(r.name)+'</span></button></td><td><div class="search-path"><span title="'+esc(r.path)+'">'+esc(r.path)+'</span><button class="icon-btn" data-copy-path="'+esc(r.path)+'" title="경로 복사" aria-label="'+esc(r.name)+' 경로 복사">'+icon("copy")+'</button></div></td></tr>';
-      }).join("");
-      empty.hidden=!!result.results.length;
-      empty.textContent="일치하는 파일이나 폴더가 없습니다.";
+      searchBackend=result.backend;
+      searchTotal=result.total;
+      shownSearchRows=result.results;
+      paintSearchRows();
       if(result.results.some(r=>!r.isFolder))showFileIcons(version).catch(()=>{});
     }catch(e){
       if(version!==liveVersion)return;
@@ -226,17 +247,24 @@ function review(){
   rows();syncInspector();
   if(detailOpen&&activeId!==null)detail(activeId).catch(errorDialog);
 }
+function reviewIcon(ext){
+  const src=Object.hasOwn(reviewIcons,ext)&&reviewIcons[ext];
+  if(src)return '<img class="shell-icon" alt="" src="'+esc(src)+'">';
+  return '<i class="ph ph-file shell-icon" data-review-ext="'+esc(ext)+'" aria-hidden="true"></i>';
+}
 function fileBranch(f){
   const move=layout.get(f.id)||originalLayout.get(f.id);
   const reason=!move?f.note:!selected.has(f.id)?"선택 제외":move.skip;
+  const destination=move?move.target:"원래 위치 유지";
   return '<div class="branch-file"><input type="checkbox" data-check="'+f.id+'" aria-label="'+esc(f.name)+' 선택" '+(selected.has(f.id)?"checked":"")+'>'+
-    '<div><button class="tree-name" data-file="'+f.id+'">'+fileBadge(f.ext)+esc(f.name)+'</button>'+
-    '<div class="tree-path"><span>원래 위치</span><code>'+esc(f.path)+'</code></div>'+
-    (move?'<div class="tree-path"><span>예상 경로</span><code>'+esc(move.target)+'</code></div>':"")+
-    (reason?'<small class="hold-reason">'+esc(reason)+'</small>':"")+'</div></div>';
+    '<button class="search-name" data-entry="file" data-id="'+f.id+'" aria-label="'+esc(f.name)+' 파일 열기">'+reviewIcon(f.ext)+'<span class="entry-text" title="'+esc(f.name)+'">'+esc(f.name)+'</span></button>'+
+    '<span class="review-path" title="'+esc(f.path)+'">'+esc(parentPath(f.path))+'</span>'+
+    '<span class="review-path'+(reason?' hold-reason':'')+'" title="'+esc([destination,reason].filter(Boolean).join("\n"))+'">'+
+    esc(reason||parentPath(destination))+'</span><button class="entry-info" data-file="'+f.id+'" title="경로와 추천 근거" aria-label="'+esc(f.name)+' 정보">'+icon("info")+'</button></div>';
 }
 function paintTree(){
-  if(!$("#folder-tree"))return;
+  if(!$("#folder-tree")||folderEditor)return;
+  const focusedFolder=document.activeElement?.matches(".folder-tree summary")?document.activeElement.parentElement.dataset.tree:null;
   const focused=document.activeElement?.dataset;
   const visible=visibleFiles(), branches=new Map();
   for(const f of visible){
@@ -256,26 +284,149 @@ function paintTree(){
     const count=members.filter(f=>layout.has(f.id)&&selected.has(f.id)&&!layout.get(f.id).skip).length;
     const folderTitle=destination?parentPath(destination.target).split(/[\\\\/]/).pop():"미분류";
     const kind=!g?"원래 위치 유지":destination?.mode==="existing"?"기존 폴더":"새 폴더";
-    node.innerHTML='<summary>'+icon(g?"folder-notch":"tray")+'<strong>'+esc(folderTitle)+'</strong><small>'+kind+'</small><b>'+
-      (g?(layoutReady?"이동 "+count+" / "+members.length:"확인 중"):members.length+"개")+'</b></summary><div class="tree-children"></div>';
+    const kindOfEntry=destination?.mode==="existing"?"folder":"proposal";
+    const nameControl=g?'<button class="entry-title" data-entry="'+kindOfEntry+'" data-id="'+esc(id)+'"><strong class="entry-text" title="'+esc(folderTitle)+'">'+esc(folderTitle)+'</strong></button>':'<strong>미분류</strong>';
+    node.innerHTML='<summary><span class="disclosure-hit" aria-hidden="true"></span>'+(g?'<i class="result-folder" aria-hidden="true"></i>':icon("tray"))+
+      nameControl+'<small>'+kind+'</small><b>'+(g?(layoutReady?"이동 "+count+" / "+members.length:"확인 중"):members.length+"개")+'</b></summary><div class="tree-children"></div>';
     const paint=()=>{
       const body=node.lastElementChild;
       if(!node.open||body.childElementCount)return;
       const notes=g?[...new Set(members.map(f=>groups.get(f.group)))].map(group=>
-        '<div class="branch-note"><span>'+esc(group.note)+'</span><button class="btn" data-edit="rename" data-group="'+esc(group.id)+'">이름 변경</button></div>').join(""):"";
-      body.innerHTML=notes+members.map(fileBranch).join("");
+        '<div class="branch-note">'+esc(group.note)+'</div>').join(""):"";
+      body.innerHTML=notes+'<div class="branch-head"><span></span><span>이름</span><span>원래 폴더</span><span>이동할 폴더 · 상태</span></div>'+members.map(fileBranch).join("");
     };
-    node.ontoggle=()=>{if(!node.isConnected)return;if(node.open)expanded.add(id);else expanded.delete(id);paint();};
+    node.ontoggle=()=>{if(!node.isConnected)return;if(node.open)expanded.add(id);else expanded.delete(id);paint();markSelection();};
     paint();tree.append(node);
   }
   if(!visible.length)tree.textContent="표시할 파일이 없습니다.";
   tree.scrollTop=position;
+  markSelection();
   const checked=visible.filter(f=>selected.has(f.id)).length;
   $("#all-check").checked=visible.length>0&&checked===visible.length;
   $("#all-check").indeterminate=checked>0&&checked<visible.length;
   document.querySelectorAll('[data-file-edit],[data-action="groupMenu"]').forEach(b=>b.disabled=busy||!editableIds().length);
   if(focused?.check!==undefined)$('[data-check="'+focused.check+'"]')?.focus({preventScroll:true});
+  if(focusedFolder)$('[data-tree="'+CSS.escape(focusedFolder)+'"] summary')?.focus({preventScroll:true});
   updateReviewBar();
+}
+function entryKey(button){
+  const {entry,id}=button.dataset;
+  return [entry,entry==="search"?"":data?.generation,id].join("/");
+}
+function markSelection(){
+  document.querySelectorAll("[data-entry]").forEach(el=>{
+    const chosen=entryKey(el)===pickedKey;
+    el.classList.toggle("entry-picked",chosen);
+    el.setAttribute("aria-pressed",String(chosen));
+  });
+}
+function entryArgs(button){
+  return {entry:button.dataset.entry,id:button.dataset.entry==="file"?Number(button.dataset.id):button.dataset.id};
+}
+async function openEntry(button){
+  if(button.dataset.entry==="proposal"){
+    const folder=button.closest("details");
+    folder.open=!folder.open;return;
+  }
+  if(button.dataset.entry==="search")return call("openSearchResult",{id:button.dataset.id});
+  return call("openReviewEntry",entryArgs(button));
+}
+function renameSearchPaths(result){
+  if(!searchBackend)return;
+  const old=result.old.toLowerCase(), prefix=old+"\\";
+  const query=$("#external-query").value.trim().toLowerCase();
+  const previousCount=shownSearchRows.length;
+  shownSearchRows=shownSearchRows.filter(row=>row.path.toLowerCase()!==old||result.name.toLowerCase().includes(query));
+  searchTotal-=previousCount-shownSearchRows.length;
+  for(const row of shownSearchRows){
+    const current=row.path.toLowerCase();
+    if(current===old)Object.assign(row,{name:result.name,path:result.path});
+    else if(current.startsWith(prefix))row.path=result.path+row.path.slice(result.old.length);
+  }
+  if(view==="search"){
+    paintSearchRows();
+    showFileIcons(liveVersion).catch(()=>{});
+  }else retryOnReturn=true;
+}
+async function applyRename(button,title,prepared){
+  const {entry,id}=entryArgs(button);
+  if(entry==="proposal"){
+    const result=await call("edit",{kind:"folderTitle",group:id,title});
+    Object.assign(groups.get(id),{title:result.title,note:result.note});
+    data.layout=result.layout;
+  }else{
+    const result=await call("renameEntry",{token:prepared.token,title});
+    renameSearchPaths(result);
+    if(result.refresh&&data){
+      const translate=p=>p===result.old?result.path:p.startsWith(result.old+"\\")?result.path+p.slice(result.old.length):p;
+      const checked=new Set(data.files.filter(f=>selected.has(f.id)).map(f=>translate(f.path)));
+      const openPaths=new Set(data.files.filter(f=>expanded.has(folderBranches.get(f.group)||"hold")).map(f=>translate(f.path)));
+      const before=data;
+      await scan({...options,roots:result.roots},false);
+      if(data===before){
+        data=null;groups.clear();files.clear();view="search";render();
+        return;
+      }
+      selected=new Set(data.files.filter(f=>checked.has(f.path)).map(f=>f.id));
+      for(const f of data.files){
+        if(openPaths.has(f.path))expanded.add(folderBranches.get(f.group)||"hold");
+        if(entry==="file"&&f.path===result.path){
+          button.dataset.id=String(f.id);
+          pickedKey=entryKey(button);
+        }
+      }
+    }
+    if(result.layout&&data){
+      for(const g of result.groups)Object.assign(groups.get(g.id),g);
+      data.layout=result.layout;
+    }
+  }
+  if(data)originalLayout=new Map(data.layout.map(row=>[row.id,row]));
+  layoutKey="";layoutReady=false;
+}
+async function editEntry(button){
+  if(busy||folderEditor||!button.isConnected)return;
+  clearTimeout(renameTimer);
+  const original=button.querySelector(".entry-text").textContent;
+  const input=document.createElement("input"),args=entryArgs(button);
+  input.className="folder-title-input";input.value=original;input.maxLength=args.entry==="proposal"?100:255;
+  input.setAttribute("aria-label","새 이름");
+  let saving=false;
+  folderEditor=input;
+  const prepared=args.entry==="proposal"?Promise.resolve({name:original,isFolder:true}):call("beginRename",args);
+  const finish=focus=>{
+    if(folderEditor!==input)return;
+    folderEditor=null;
+    if(input.isConnected)input.replaceWith(button);
+    if(data&&view==="review"){nav();rows();}
+    if(focus)document.querySelector('[data-entry="'+args.entry+'"][data-id="'+CSS.escape(button.dataset.id)+'"]')?.focus({preventScroll:true});
+  };
+  button.replaceWith(input);input.focus();input.select();
+  prepared.then(result=>{
+    if(folderEditor!==input)return;
+    const dot=original.lastIndexOf(".");
+    if(!result.isFolder&&dot>0&&input.value===original)input.setSelectionRange(0,dot);
+  }).catch(error=>{if(folderEditor===input){finish(true);errorDialog(error);}});
+  input.addEventListener("click",e=>e.stopPropagation());
+  input.addEventListener("blur",()=>{if(!saving)finish(false);});
+  input.addEventListener("input",()=>input.setCustomValidity(""));
+  input.addEventListener("keydown",async e=>{
+    if(e.isComposing||e.keyCode===229||!["Enter","Escape"].includes(e.key))return;
+    e.preventDefault();e.stopPropagation();
+    if(saving)return;
+    if(e.key==="Escape"||input.value===original){finish(true);return;}
+    if(!input.value.trim()){input.setCustomValidity("새 이름을 입력하세요.");input.reportValidity();return;}
+    saving=true;input.readOnly=true;
+    try{
+      await applyRename(button,input.value,await prepared);
+      finish(true);
+      toast(args.entry==="proposal"?"예상 이동 경로에 새 이름을 적용했습니다.":"디스크에 새 이름을 적용했습니다.");
+    }catch(error){
+      saving=false;input.readOnly=false;
+      if(!input.isConnected){finish(false);errorDialog(error);return;}
+      input.focus();input.setCustomValidity(error.message);input.reportValidity();
+    }
+  });
 }
 function rows(){
   if(!data||!$("#folder-tree"))return;
@@ -314,7 +465,7 @@ async function detail(id,open=true){
 function renderInspector(){
   const f=files.get(activeId),info=detailInfo;if(!f||!info||!$("#inspector-body"))return;
   $("#inspector-body").innerHTML='<div class="inspector-file">'+fileBadge(f.ext)+'<div><h3>'+esc(f.name)+'</h3><p>'+esc((f.ext||"파일").toUpperCase())+' · '+bytes(f.size)+'</p></div></div><div class="detail-tabs" role="group" aria-label="파일 근거 보기 방식"><button data-detail-tab="evidence" aria-pressed="'+(detailTab==="evidence")+'">파일 근거</button><button data-detail-tab="related" aria-pressed="'+(detailTab==="related")+'">'+icon("git-branch")+'관계 보기</button></div>'+
-    (detailTab==="related"?relatedContent(f):'<section class="detail-section"><h3>추천 설명</h3><p class="info-note">'+esc(info.note||"추천 설명이 없습니다.")+(info.evidence?'<br>'+esc(info.evidence):"")+'</p>'+infoRows([["현재 묶음",groups.get(f.group)?.title||"미분류"],["판정",f.state],["신뢰도",f.confidence?.toFixed(2)]])+'</section><section class="detail-section"><h3>실제 파일 정보</h3>'+infoRows([["원래 경로",info.path||f.path],["수정 시각",info.modified],["생성 시각",info.created]])+'</section><details class="detail-more"><summary>추가 분석 정보</summary>'+infoRows([["정규화 이름",info.normalized],["핵심 단어",info.tokens?.join(" · ")],["역할",info.roles?.join(" · ")],["순번",info.sequence],["버전",info.versions?.join(" · ")],["강좌명",info.course],["다운로드 페이지",info.page],["출처 페이지",info.source_page],["다운로드 사이트",f.host],["본문 발췌",info.excerpt]])+'</details>');
+    (detailTab==="related"?relatedContent(f):'<section class="detail-section"><h3>추천 설명</h3><p class="info-note">'+esc(info.note||"추천 설명이 없습니다.")+(info.evidence?'<br>'+esc(info.evidence):"")+'</p>'+infoRows([["현재 묶음",groups.get(f.group)?.title||"미분류"],["판정",f.state],["신뢰도",f.confidence?.toFixed(2)]])+'</section><section class="detail-section"><h3>실제 파일 정보</h3>'+infoRows([["원래 경로",info.path||f.path],["예상 경로",originalLayout.get(f.id)?.target||"원래 위치 유지"],["수정 시각",info.modified],["생성 시각",info.created]])+'</section><details class="detail-more"><summary>추가 분석 정보</summary>'+infoRows([["정규화 이름",info.normalized],["핵심 단어",info.tokens?.join(" · ")],["역할",info.roles?.join(" · ")],["순번",info.sequence],["버전",info.versions?.join(" · ")],["강좌명",info.course],["다운로드 페이지",info.page],["출처 페이지",info.source_page],["다운로드 사이트",f.host],["본문 발췌",info.excerpt]])+'</details>');
 }
 function relatedContent(f){
   const center='<div class="relation-center">'+icon("file-text")+'<div><small>선택한 파일</small><strong>'+esc(f.name)+'</strong></div></div>';
@@ -343,7 +494,8 @@ async function historyDialog(){
   const batches=await call("history");
   if(version!==searchVersion||!$("#history-list"))return;
   $("#history-list").innerHTML=batches.map(batch=>{
-    const summary=batch.readable?"이동 "+batch.moved+"개 · 복원 "+batch.undone+"개 · 남은 이동 "+batch.pending+"개":"이력 파일을 읽을 수 없습니다.";
+    const operation=batch.operation==="rename"?"이름 변경":"이동";
+    const summary=batch.readable?operation+" "+batch.moved+"개 · 복원 "+batch.undone+"개 · 복원 대기 "+batch.pending+"개":"이력 파일을 읽을 수 없습니다.";
     return '<article class="history-batch"><div class="history-head"><strong>'+esc(batch.time)+'</strong>'+
       '<button class="btn" data-history="'+esc(batch.id)+'" '+(batch.readable?"":"disabled")+'>파일과 경로 보기</button></div><p>'+summary+'</p></article>';
   }).join("")||"정리 기록이 없습니다.";
@@ -352,8 +504,8 @@ async function historyDetail(batch){
   const version=++searchVersion, records=await call("historyDetail",{batch});
   if(version!==searchVersion)return;
   const states={moved:"이동됨",undone:"복원됨",skipped:"건너뜀",failed:"실패",planned:"이동 미확인"};
-  const body=records.map(r=>'<div class="move-row"><b>'+esc(states[r.status]||r.status)+'</b>'+
-    infoRows([["원래 경로",r.source],["이동 경로",r.target],["사유",r.reason]])+'</div>').join("");
+  const body=records.map(r=>'<div class="move-row"><b>'+esc(r.operation==="rename"&&r.status==="moved"?"이름 변경됨":states[r.status]||r.status)+'</b>'+
+    infoRows([["원래 경로",r.source],["대상 경로",r.target],["기록 당시 원본",r.recordedSource],["기록 당시 목적지",r.recordedTarget],["사유",r.reason]])+'</div>').join("");
   showDialog("정리 기록 상세","",body,btn("history","이력 목록")+
     (records.some(r=>r.pending)?btn("submitDialog","이 작업 복원 미리보기","arrow-counter-clockwise",true):""),()=>preview("undo",{batch}),true);
 }
@@ -374,6 +526,13 @@ async function applyEdit(args){
 }
 async function editForm(kind,gid){
   const ids=editableIds(),g=groups.get(gid);
+  if(kind==="rename"){
+    const name=$('[data-tree="'+CSS.escape(folderBranches.get(gid)||gid)+'"] .entry-title');
+    close();
+    if(!name){toast("폴더를 목록에서 다시 선택하세요.");return;}
+    name.scrollIntoView({block:"nearest"});pickedKey=entryKey(name);markSelection();
+    return editEntry(name);
+  }
   if(kind==="manual"){close();return preview("manual");}
   const args={kind,files:ids,group:g?.id||null};
   if(["must","cannot","clear"].includes(kind))return applyEdit(args);
@@ -385,8 +544,8 @@ async function editForm(kind,gid){
       btn("close","취소")+btn("submitDialog","적용","check",true),()=>applyEdit({...args,target:$("#value").value}));return;
   }
   const cover=kind==="course"?await call("cover",{group:gid}):null;
-  const title=({rename:"그룹 이름 변경",create:"새 그룹 만들기",split:"그룹 분리",course:"그룹 이름 확인"})[kind];
-  showDialog(title,cover?.[1]||"",'<label>그룹 이름<input id="value" class="field" maxlength="140" value="'+esc(cover?.[0]||(kind==="rename"?g?.title:""))+'"></label>',
+  const title=({create:"새 그룹 만들기",split:"그룹 분리",course:"그룹 이름 확인"})[kind];
+  showDialog(title,cover?.[1]||"",'<label>그룹 이름<input id="value" class="field" maxlength="140" value="'+esc(cover?.[0]||"")+'"></label>',
     btn("close","취소")+btn("submitDialog","저장","check",true),()=>{const val=$("#value").value.trim();if(!val){$("#value").focus();return;}return applyEdit({...args,title:val});});
   $("#value").focus();$("#value").select();
 }
@@ -403,7 +562,12 @@ async function preview(kind,args={}){
     (kind==="organize"&&move.length?btn("changeMoveParent","새 묶음의 상위 폴더 변경","folder-open"):"")+(move.length?btn("submitDialog",move.length+"개 파일 "+(kind==="undo"?"복원":"이동"),kind==="undo"?"arrow-counter-clockwise":"folder-simple-plus",true):""),
     async()=>{close();setBusy(true);status("파일 처리 중");let report;
       try{report=await call("execute",{token:result.token});}finally{setBusy(false);status("");}
-      if(data)await scan(options,false);showDialog("파일 처리 결과","",'<div class="result-lines">'+esc(report.join("\n"))+'</div>',btn("close","닫기","check",true),null,true);
+      if(data)await scan(await call("options"),false);
+      if($("#external-query").value.trim()){
+        if(view==="search")liveSearch();
+        else retryOnReturn=true;
+      }
+      showDialog("파일 처리 결과","",'<div class="result-lines">'+esc(report.join("\n"))+'</div>',btn("close","닫기","check",true),null,true);
     },true);
   const change=$('[data-action="changeMoveParent"]');
   if(change)change.onclick=async()=>{
@@ -471,10 +635,25 @@ async function action(key){
 }
 document.addEventListener("click",async e=>{
   try {
+    const nameButton=e.target.closest("[data-entry]");
+    if(nameButton){
+      e.preventDefault();
+      clearTimeout(renameTimer);
+      if(busy||(!e.target.closest(".entry-text")&&e.detail!==0))return;
+      const key=entryKey(nameButton),already=pickedKey===key;
+      pickedKey=key;markSelection();
+      if(e.detail===0)return await openEntry(nameButton);
+      if(e.detail===1&&already)renameTimer=setTimeout(()=>{
+        if(nameButton.isConnected&&pickedKey===key)editEntry(nameButton).catch(errorDialog);
+      },doubleClickMs+30);
+      return;
+    }
+    clearTimeout(renameTimer);
+    const heading=e.target.closest(".folder-tree summary");
+    if(heading&&e.detail>0&&!e.target.closest(".disclosure-hit,input")){e.preventDefault();return;}
     const el=e.target.closest("button,input,tr[data-file]");if(!el)return;
     const d=el.dataset;
     if(d.history)return await historyDetail(d.history);
-    if(d.openResult){if(e.detail<2)await call("openSearchResult",{id:d.openResult});return;}
     if(d.copyPath){await navigator.clipboard.writeText(d.copyPath);toast("경로를 복사했어요.");return;}
     if(d.action)return await action(d.action);
     if(busy)return;
@@ -498,7 +677,23 @@ document.addEventListener("click",async e=>{
     if(d.relation)return await applyEdit({kind:d.relation,files:pair});
   } catch(err){errorDialog(err);}
 });
+document.addEventListener("pointerdown",e=>{
+  const button=e.target.closest("[data-entry]");
+  if(button&&!e.target.closest(".entry-text"))e.preventDefault();
+  if(e.target.closest(".folder-tree summary")&&!e.target.closest(".entry-text,.disclosure-hit,input"))e.preventDefault();
+});
+document.addEventListener("dblclick",e=>{
+  const button=e.target.closest(".entry-text")?.closest("[data-entry]");
+  if(!button||busy)return;
+  clearTimeout(renameTimer);e.preventDefault();openEntry(button).catch(errorDialog);
+});
 document.addEventListener("keydown",e=>{
+  if(e.key==="F2"&&!folderEditor){
+    const button=e.target.closest("[data-entry]")||e.target.closest(".folder-tree summary")?.querySelector("[data-entry]");
+    if(button){
+      e.preventDefault();pickedKey=entryKey(button);markSelection();editEntry(button).catch(errorDialog);return;
+    }
+  }
   if(e.ctrlKey&&e.key.toLowerCase()==="k"&&!$("#dialog").open){e.preventDefault();if(view==="review")$("#search")?.focus();else{view="search";render();$("#external-query").focus();}}
   if(e.key==="Enter"&&e.target.matches("tr[data-file]")){e.preventDefault();detail(+e.target.dataset.file).catch(errorDialog);}
   if(e.key==="Enter"&&e.target.id==="value"&&e.target.tagName==="INPUT"){e.preventDefault();action("submitDialog").catch(errorDialog);}
@@ -515,4 +710,5 @@ compactDetails.addEventListener("change",syncInspector);
 window.desktop.status(t=>{if(busy)status(t,scanBusy);});
 $("#dialog").addEventListener("cancel",()=>{searchVersion++;dialogAction=null;});
 $("#external-query").oninput=liveSearch;
+call("doubleClickTime").then(value=>{doubleClickMs=value;}).catch(()=>{});
 render();

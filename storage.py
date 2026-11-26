@@ -441,6 +441,10 @@ def pending(row):
 def restore_reason(row):
     try:
         src, dst = Path(row["src"]), Path(row["dst"])
+        if row.get("operation")=="rename":
+            from entry_names import ensure_available
+            ensure_available(dst,src,row["uid"])
+            return ""
         validate_destination(row)
         check_directory(dst.parent)
         if os.path.lexists(src):
@@ -450,11 +454,22 @@ def restore_reason(row):
         if not matching(dst,row,row.get("dst_uid")):
             raise OSError("이동한 파일이 변경되었습니다.")
         return ""
-    except (OSError,RuntimeError) as error:
+    except (OSError,RuntimeError,ValueError) as error:
         return str(error)
 
 
 def restore_row(log,rows,row):
+    if row.get("operation")=="rename":
+        from entry_names import apply
+        try:
+            apply(log,row,True)
+        except (OSError,ValueError) as error:
+            if row["status"]!="rename_returning":
+                row["reason"]=str(error)
+                save(log,rows)
+            else:
+                raise
+        return
     reason = restore_reason(row)
     if reason:
         row.update(status="moved",reason=reason)
@@ -522,7 +537,10 @@ def recover_locked(directory):
             rows=read_history(path)
         except (OSError,ValueError):
             continue
-        if rows and rows[0].get("transaction")=="moving":
+        if rows and rows[0]["status"] in ("renaming","rename_returning"):
+            from entry_names import recover
+            recover(path,rows[0])
+        elif rows and rows[0].get("transaction")=="moving":
             finish_move(path,rows)
         elif any(r["status"]=="restoring" for r in rows):
             for r in rows:
@@ -570,6 +588,7 @@ def recent_history() -> list[HistoryEvent]:
         except ValueError:
             stamp=datetime.fromtimestamp(path.stat().st_mtime)
         result.append(HistoryEvent(id=path.stem,time=stamp.strftime("%Y.%m.%d %H:%M:%S"),readable=readable,
+                                   operation=rows[0].get("operation","move") if rows else "move",
                                    moved=sum(pending(r) or r["status"]=="undone" for r in rows),
                                    undone=sum(r["status"]=="undone" for r in rows),
                                    pending=sum(pending(r) for r in rows),

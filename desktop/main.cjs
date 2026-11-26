@@ -5,10 +5,20 @@ const {createInterface} = require("node:readline");
 const path = require("node:path");
 
 const root = path.dirname(__dirname);
-const allowed = new Set(["scan","options","sources","search","chooseFolder","detail","related","history","historyDetail","review","matrix","pair","preview","execute","edit","cover","openDownloads","bridge"]);
+const allowed = new Set(["scan","options","sources","search","chooseFolder","detail","related","history","historyDetail","review","matrix","pair","preview","execute","edit","cover","openDownloads","bridge","beginRename","renameEntry","doubleClickTime"]);
 const pending = new Map();
 const iconCache = new Map();
 const searchRows = new Map();
+let reviewTypes = new Map();
+let reviewGeneration = "";
+let reviewFiles=new Map(), reviewFolders=new Map();
+
+function rememberFolders(layout){
+  reviewFolders=new Map();
+  for(const row of layout){
+    if(row.mode==="existing")reviewFolders.set(reviewFiles.get(row.id)?.group,path.dirname(row.target));
+  }
+}
 let searchRevision=0;
 let window, child, sequence=0, mutating=false;
 
@@ -60,6 +70,22 @@ async function fileIcon(row) {
 }
 ipcMain.handle("desktop",async(event,action,args={})=>{
   if (!isLocal(event)) return {ok:false,error:"지원하지 않는 작업입니다."};
+  if(action==="openReviewEntry"){
+    const source=args.entry==="file"?reviewFiles.get(args.id)?.path:reviewFolders.get(args.id);
+    if(args.generation!==reviewGeneration||!source)return {ok:false,error:"목록에서 다시 선택하세요."};
+    const error=await shell.openPath(source);
+    return error?{ok:false,error}:{ok:true,value:true};
+  }
+  if(action==="beginRename"&&args.entry==="search"){
+    const row=searchRows.get(args.id);
+    if(!row)return {ok:false,error:"검색 결과에서 다시 선택하세요."};
+    args={entry:"search",source:row.path};
+  }
+  if(action==="reviewIcons"){
+    if(args.generation!==reviewGeneration)return {ok:true,value:{}};
+    const icons=await Promise.all([...reviewTypes].map(async ([ext,row])=>[ext,await fileIcon(row)]));
+    return {ok:true,value:args.generation===reviewGeneration?Object.fromEntries(icons):{}};
+  }
   if(action==="openSearchResult"){
     const row=searchRows.get(args.id);
     if(!row||!path.isAbsolute(row.path))return {ok:false,error:"검색 결과가 바뀌었습니다. 이름을 다시 선택하세요."};
@@ -73,8 +99,9 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
     return {ok:true,value:revision===searchRevision?Object.fromEntries(icons):{}};
   }
   if (!allowed.has(action)) return {ok:false,error:"지원하지 않는 작업입니다."};
-  if (action==="execute" && mutating) return {ok:false,error:"파일을 처리하고 있습니다."};
-  if (action==="execute") mutating=true;
+  const writes=action==="execute"||action==="renameEntry";
+  if (writes && mutating) return {ok:false,error:"파일을 처리하고 있습니다."};
+  if (writes) mutating=true;
   try {
     if (action==="chooseFolder") {
       const selected=await dialog.showOpenDialog(window,{title:"폴더 선택",properties:["openDirectory"]});
@@ -88,6 +115,26 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
     const revision=action==="search"?++searchRevision:null;
     if(revision!==null)searchRows.clear();
     const reply=await call(action,args);
+    if(action==="scan" && reply.ok){
+      reviewGeneration=reply.value.generation;
+      reviewFiles=new Map(reply.value.files.map(f=>[f.id,f]));
+      rememberFolders(reply.value.layout);
+      reviewTypes=new Map();
+      for(const row of reply.value.files){
+        if(!reviewTypes.has(row.ext))reviewTypes.set(row.ext,row);
+      }
+    }
+    if(action==="renameEntry" && reply.ok){
+      const {old,path:next,layout,refresh}=reply.value;
+      for(const row of searchRows.values()){
+        const relative=path.relative(old,row.path);
+        if(relative==="")Object.assign(row,{name:path.basename(next),path:next});
+        else if(!relative.startsWith(".."+path.sep)&&relative!==".."&&!path.isAbsolute(relative))
+          row.path=path.join(next,relative);
+      }
+      if(layout)rememberFolders(layout);
+      if(refresh)reviewGeneration="";
+    }
     if(action==="search" && reply.ok && revision===searchRevision){
       reply.value.results.forEach((row,i)=>{
         row.id=revision+"-"+i;
@@ -96,7 +143,7 @@ ipcMain.handle("desktop",async(event,action,args={})=>{
     }
     if (action==="bridge" && reply.ok) clipboard.writeText(reply.value);
     return reply;
-  } finally {if (action==="execute") mutating=false;}
+  } finally {if (writes) mutating=false;}
 });
 ipcMain.on("cancel",event=>{if(isLocal(event) && child) child.stdin.write('{"action":"cancel"}\n');});
 ipcMain.on("cancel-search",event=>{

@@ -10,6 +10,7 @@ from unittest.mock import patch
 from desktop_service import Desktop
 import eligibility
 import storage
+import entry_names
 
 
 class ReviewTests(unittest.TestCase):
@@ -210,3 +211,82 @@ app.execute(app.preview({}))
         self.assertEqual(sum(r["readable"] for r in records),1)
         self.assertIsNotNone(storage.latest()[0])
         self.assertEqual(damaged.read_bytes(),b"{")
+
+    def test_inline_title_updates_preview_without_scanning_or_moving(self):
+        paths=self.project()
+        data=self.scan()
+        group=data["groups"][0]["id"]
+        old=self.app.preview({})
+        def rename(title):
+            return self.app.run("edit",dict(generation=data["generation"],kind="folderTitle",group=group,title=title))
+        for invalid in ("","../other","NUL"):
+            with self.assertRaises(ValueError):rename(invalid)
+        with patch("engine.analyze",side_effect=AssertionError("unexpected scan")):
+            result=rename("달빛정원 납품")
+        folder=self.inbox/"달빛정원 납품"
+        self.assertEqual({Path(r["target"]).parent for r in result["layout"]},{folder})
+        self.assertFalse(folder.exists())
+        self.assertTrue(all(p.exists() for p in paths))
+        with self.assertRaises(ValueError):self.app.execute(old)
+        self.assertEqual(self.scan()["groups"][0]["title"],folder.name)
+
+    def rename_on_disk(self,path,name):
+        app=self.app
+        edit=app.run("beginRename",dict(entry="search",source=str(path)))
+        return app.run("renameEntry",dict(token=edit["token"],title=name))
+
+    def test_renamed_folder_and_file_follow_an_older_move(self):
+        sources=self.project()
+        self.move()
+        first=self.app.run("history",{})[0]["id"]
+        original=self.inbox/"달빛정원"
+        folder=Path(self.rename_on_disk(original,"공유 보관함")["path"])
+        child=Path(self.rename_on_disk(folder/sources[0].name,"수정한 이름.xlsx")["path"])
+        self.assertTrue(child.is_file())
+        app=Desktop()
+        preview=app.preview(dict(kind="undo",batch=first))
+        self.assertTrue(all(not row["skip"] for row in preview["rows"]))
+        self.assertEqual({Path(r["source"]).parent for r in preview["rows"]},{folder})
+        self.assertIn(str(child),[r["source"] for r in preview["rows"]])
+        app.execute(preview)
+        self.assertFalse(folder.exists())
+        for path in sources:self.assertEqual(path.read_bytes(),path.name.encode())
+
+    def test_undo_folder_name_preserves_children_and_renamed_source_roots(self):
+        nested=self.inbox/"원본"
+        nested.mkdir()
+        child=nested/"보관.txt"
+        child.write_bytes(b"sample")
+        self.scan(roots=[str(nested)])
+        result=self.rename_on_disk(nested,"보관폴더")
+        changed=Path(result["path"])
+        self.assertEqual(storage.source_roots(),[str(changed)])
+        self.assertEqual((changed/child.name).read_bytes(),b"sample")
+        app=Desktop()
+        app.execute(app.preview(dict(kind="undo")))
+        self.assertEqual(storage.source_roots(),[str(nested)])
+        self.assertEqual(child.read_bytes(),b"sample")
+
+    def test_rename_rejects_stale_selection_and_conflicts(self):
+        original,other,_=self.project()
+        edit=self.app.run("beginRename",dict(entry="search",source=str(original)))
+        with self.assertRaises(FileExistsError):
+            self.app.run("renameEntry",dict(token=edit["token"],title=other.name))
+        original.rename(original.with_suffix(".old"))
+        original.write_bytes(b"replacement")
+        with self.assertRaises(ValueError):
+            self.app.run("renameEntry",dict(token=edit["token"],title="bad.xlsx"))
+        self.assertEqual(original.read_bytes(),b"replacement")
+        self.assertEqual(other.read_bytes(),other.name.encode())
+
+    def test_recover_after_disk_rename_before_rewriting_history(self):
+        sources=self.project()
+        self.move()
+        batch=storage.recent_history()[0]["id"]
+        folder=self.inbox/"달빛정원"
+        with patch.object(entry_names,"recover",side_effect=SystemExit),self.assertRaises(SystemExit):
+            self.rename_on_disk(folder,"새 이름")
+        app=Desktop()
+        self.assertEqual(app.run("history",{})[0]["operation"],"rename")
+        app.execute(app.preview(dict(kind="undo",batch=batch)))
+        self.assertTrue(all(p.is_file() for p in sources))

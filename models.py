@@ -180,6 +180,7 @@ class RelatedFile(TypedDict):
 
 
 class HistoryEvent(TypedDict):
+    operation: str
     id: str
     readable: bool
     time: str

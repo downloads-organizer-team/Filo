@@ -44,7 +44,8 @@ dialog{width:min(530px,90vw);max-height:84vh;padding:0;border:1px solid #e7e5ee;
 .search-list th,.search-list td{padding:0 8px;text-align:left}.search-list th{height:24px}.search-list th:first-child{width:42%}
 .search-list td{height:23px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.search-list tr{cursor:default}
 .search-name{display:flex;align-items:center;gap:6px;width:100%;min-width:0;height:22px;padding:0;text-align:left;line-height:18px}
-.search-name:hover span{text-decoration:underline}.search-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-name .entry-text:hover,.entry-title .entry-text:hover{text-decoration:underline}.search-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-name,.entry-title{cursor:default}
 .result-folder{position:relative;flex:none;width:16px;height:11px;margin-top:2px;background:linear-gradient(#ffe493,#ffcb4d);border-radius:1px 2px 2px 2px;box-shadow:inset 0 0 0 1px #dbab3a}
 .result-folder::before{content:"";position:absolute;top:-2px;left:0;width:7px;height:3px;background:#e8ac32;border-radius:2px 2px 0 0}
 .search-path .icon-btn{width:22px;height:20px;padding:0;border:0;background:transparent}.search-path .icon-btn i{font-size:14px}
@@ -60,23 +61,30 @@ dialog{width:min(530px,90vw);max-height:84vh;padding:0;border:1px solid #e7e5ee;
 .inspector-heading .btn{display:inline-flex}
 .folder-tree{flex:1;min-height:0;overflow:auto;padding:4px 12px 12px}
 .folder-tree details{border-bottom:1px solid var(--line)}
-.folder-tree summary{display:flex;align-items:center;gap:10px;min-height:43px;padding:5px 9px;cursor:pointer;border-radius:5px}
-.folder-tree summary:hover,.tree-name:hover{background:#f5f3fa}
-.folder-tree summary::before{content:"▸";color:#70658e}
-.folder-tree details[open]>summary::before{content:"▾"}
+.folder-tree summary{display:flex;align-items:center;gap:8px;min-height:32px;padding:3px 8px;cursor:pointer;border-radius:4px}
+.folder-tree summary:hover,.branch-file:hover{background:#f5f3fa}
+.disclosure-hit{display:grid;place-items:center;width:15px;height:22px;cursor:pointer;color:#70658e}
+.disclosure-hit::before{content:"▸"}
+.folder-tree details[open]>summary .disclosure-hit::before{content:"▾"}
 .folder-tree summary i{color:#8b72ae}
 .folder-tree summary strong{min-width:0;overflow-wrap:anywhere;font-size:14px}
 .folder-tree summary small,.branch-note{font-size:12px;color:#605b70}
 .folder-tree summary b{margin-left:auto;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums}
-.branch-note{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:6px 10px 6px 26px}
-.branch-note .btn{flex:none}
-.tree-children{margin:0 10px 8px 16px;border-left:1px solid #d7cee4}
-.branch-file{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;padding:6px 12px}
-.branch-file input{align-self:start;margin-top:6px}
-.tree-name{display:flex;gap:8px;align-items:center;text-align:left;font-weight:650;padding:2px 4px;overflow-wrap:anywhere}
-.tree-name .doctype{width:29px;height:19px;font-size:7px}
-.tree-path{display:grid;grid-template-columns:54px minmax(0,1fr);gap:6px;font-size:11px;line-height:1.5}
-.tree-path span{color:#777185}
-.tree-path code{font:inherit;overflow-wrap:anywhere;color:#494657;user-select:text}
-.hold-reason{display:block;margin-top:3px;color:#845d20;font-size:11px;overflow-wrap:anywhere}
+.branch-note{padding:3px 8px 5px 26px;overflow-wrap:anywhere}
+.tree-children{margin:0 0 6px 16px;border-left:1px solid #d7cee4}
+.branch-file,.branch-head{display:grid;grid-template-columns:16px minmax(0,1.65fr) minmax(0,1fr) minmax(0,1.15fr) 22px;column-gap:8px;align-items:center;padding:0 8px}
+.branch-head{min-height:23px;font-size:11px;color:var(--muted);background:#f8f7fb;border-block:1px solid var(--line)}
+.branch-file{height:28px;font-size:13px;border-bottom:1px solid #eeedf2}
+.branch-file input{margin:0}
+.branch-file .search-name{height:26px}
+.review-path{color:#5b5669;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:text}
+.hold-reason{color:#81591f}
+.entry-title{padding:0;min-width:0;text-align:left}
+[data-entry],.folder-tree summary{cursor:default}
+.entry-text{display:inline-block;max-width:100%;width:max-content;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:none;cursor:pointer;vertical-align:middle}
+.entry-picked .entry-text{background:#e7e2fd;color:#342664;border-radius:2px}
+.entry-info{padding:0;line-height:20px;color:#777185}
+.entry-info i.ph{font-size:14px}
+.branch-file .folder-title-input,.search-list .folder-title-input{width:100%;min-width:0;max-width:100%}
+.folder-title-input{min-width:8em;width:clamp(10em,32vw,36em);height:25px;padding:1px 5px;border:1px solid var(--purple);border-radius:3px;font:inherit}
 .selection-bar label{font-size:12px;display:flex;align-items:center;gap:5px}

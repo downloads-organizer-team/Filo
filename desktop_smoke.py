@@ -87,13 +87,36 @@ def verify(executable,everything):
                     };
                 }""")
                 await_id=directory.get_attribute("data-open-result")
-                directory.click()
+                directory.locator(".entry-text").click()
+                assert not page.evaluate("Boolean(window.openedResult)")
+                directory.locator(".entry-text").dblclick()
                 page.wait_for_function("id=>window.openedResult===id",arg=await_id)
                 launch_file=page.get_by_role("button",name=script.name+" 파일 열기",exact=True)
-                launch_file.press("Enter")
+                name_text=launch_file.locator(".entry-text")
+                glyph=launch_file.locator("img,i").first
+                glyph.dblclick()
+                bounds=launch_file.bounding_box()
+                launch_file.dblclick(position={"x":bounds["width"]-3,"y":8})
+                assert not marker.exists()
+                expect(launch_file).to_have_attribute("aria-pressed","false")
+                name_text.click()
+                expect(launch_file).to_have_attribute("aria-pressed","true")
+                assert not marker.exists()
+                name_text.dblclick()
                 deadline=monotonic()+5
                 while not marker.exists() and monotonic()<deadline:sleep(.05)
                 assert marker.exists(),"The selected test file did not run"
+                target=page.get_by_role("button",name=prefix+"-00.txt 파일 열기",exact=True)
+                target.locator(".entry-text").click()
+                page.wait_for_timeout(1100)
+                target.locator(".entry-text").click()
+                editor=page.get_by_role("textbox",name="새 이름")
+                expect(editor).to_be_visible()
+                renamed=prefix+"-00-updated.txt"
+                editor.fill(renamed)
+                editor.press("Enter")
+                expect(page.get_by_role("button",name=renamed+" 파일 열기",exact=True)).to_be_visible()
+                assert (inbox/renamed).is_file() and not (inbox/(prefix+"-00.txt")).exists()
                 stale=await_id
                 # Keep the Windows user's clipboard intact while checking which path is copied.
                 copy=page.locator("[data-copy-path]").first
@@ -108,7 +131,7 @@ def verify(executable,everything):
                 expect(page.locator("#search-meta")).to_contain_text("자동 재시도",timeout=15000)
                 resources.enter_context(isolated_instance(everything,base,inbox,base.name))
                 expect(rows).to_have_count(1,timeout=20000)
-                expect(rows.first).to_contain_text(prefix+"-00.txt")
+                expect(rows.first).to_contain_text(renamed)
                 search.fill("")
                 expect(page.locator("#search-rows tr")).to_have_count(0)
                 assert not page.evaluate("id=>window.desktop.call('openSearchResult',{id})",stale)["ok"]
@@ -137,6 +160,50 @@ def verify(executable,everything):
                 for title in ("여름 프로젝트","달빛정원"):
                     page.locator("#folder-tree summary").filter(has_text=title).press("Enter")
                 expect(page.locator("#folder-tree details[open]")).to_have_count(2)
+                expect(page.get_by_role("heading",name="파일 정리",exact=True)).to_be_visible()
+                expect(page.locator("#folder-tree .branch-file img.shell-icon").first).to_be_visible()
+                row_height=page.locator("#folder-tree .branch-file").first.bounding_box()["height"]
+                assert height<row_height<=height+7,(height,row_height)
+                tree_file=page.get_by_role("button",name="여름 프로젝트 1주차 보고서.txt 파일 열기",exact=True)
+                page.evaluate("""() => {
+                    const invoke=call;
+                    window.reviewOpens=[];
+                    call=(action,args)=>{
+                        if(action==="openReviewEntry"){window.reviewOpens.push(args);return Promise.resolve(true);}
+                        return invoke(action,args);
+                    };
+                }""")
+                tree_file.locator(".shell-icon").dblclick()
+                width=tree_file.bounding_box()["width"]
+                tree_file.dblclick(position={"x":width-2,"y":10})
+                expect(tree_file).to_have_attribute("aria-pressed","false")
+                assert not page.evaluate("window.reviewOpens.length")
+                tree_file.locator(".entry-text").dblclick()
+                assert page.evaluate("window.reviewOpens.length")==1
+                tree_file.press("F2")
+                editor=page.get_by_role("textbox",name="새 이름")
+                tree_name="여름 프로젝트 1주차 수정 보고서.txt"
+                editor.fill(tree_name)
+                editor.press("Enter")
+                expect(page.get_by_role("button",name=tree_name+" 파일 열기",exact=True)).to_be_visible()
+                assert (extra/tree_name).is_file() and not (extra/"여름 프로젝트 1주차 보고서.txt").exists()
+                summary=page.locator("#folder-tree summary").filter(has_text="달빛정원")
+                summary.locator(".result-folder").dblclick()
+                summary.locator("small").dblclick()
+                expect(summary.locator("[data-entry]")).to_have_attribute("aria-pressed","false")
+                expect(summary.locator("..")).to_have_attribute("open","")
+                assert page.evaluate("window.reviewOpens.length")==1
+                summary.press("F2")
+                editor=page.get_by_role("textbox",name="새 이름")
+                editor.fill("취소할 변경")
+                editor.press("Escape")
+                expect(summary).to_be_visible()
+                label=page.locator('[data-entry="proposal"] .entry-text').filter(has_text="달빛정원")
+                label.click()
+                label.locator("..").press("F2")
+                editor.fill("달빛정원 납품")
+                editor.press("Enter")
+                expect(page.locator("#folder-tree summary").filter(has_text="달빛정원 납품")).to_be_visible()
                 expect(page.locator("#review-count")).to_have_text("이동 대상 6개")
                 page.locator("#organize").click()
                 expect(dialog.locator(".move-row")).to_have_count(6)
@@ -151,7 +218,7 @@ def verify(executable,everything):
                 expect(dialog.get_by_role("button",name="1개 파일 이동")).to_have_count(0)
                 dialog.get_by_role("button",name="취소",exact=True).click()
                 filter_box.fill("여름 프로젝트")
-                box=page.get_by_role("checkbox",name="여름 프로젝트 1주차 보고서.txt 선택")
+                box=page.get_by_role("checkbox",name=tree_name+" 선택")
                 box.uncheck()
                 expect(page.locator("#review-hint")).to_contain_text("2개 보류")
                 box.check()
@@ -162,7 +229,8 @@ def verify(executable,everything):
                     expect(dialog.locator(".move-row")).to_have_count(3)
                     dialog.get_by_role("button",name="3개 파일 이동",exact=True).click()
                     expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
-                    assert len(list((extra/title).iterdir()))==3
+                    destination=extra/("달빛정원 납품" if title=="달빛정원" else title)
+                    assert len(list(destination.iterdir()))==3
                     dialog.get_by_role("button",name="닫기",exact=True).last.click()
                 assert not errors,errors
                 page.close()
@@ -173,15 +241,15 @@ def verify(executable,everything):
                 dialog=page.get_by_role("dialog")
                 page.get_by_role("button",name="최근 정리",exact=True).click()
                 records=dialog.locator("[data-history]")
-                expect(records).to_have_count(2)
-                records.last.click()
+                expect(records).to_have_count(4)
+                records.nth(1).click()
                 expect(dialog.locator(".move-row")).to_have_count(3)
                 dialog.get_by_role("button",name="이 작업 복원 미리보기").click()
                 dialog.get_by_role("button",name="3개 파일 복원",exact=True).click()
                 expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()
                 assert not (extra/"여름 프로젝트").exists()
                 assert len(list(extra.glob("여름 프로젝트*.txt")))==3
-                assert len(list((extra/"달빛정원").iterdir()))==3
+                assert len(list((extra/"달빛정원 납품").iterdir()))==3
                 assert (extra/"보관"/"옛 문서.txt").exists()
                 dialog.get_by_role("button",name="닫기",exact=True).last.click()
                 existing=extra/"여름 프로젝트"
@@ -193,6 +261,16 @@ def verify(executable,everything):
                 single.fill("2주차")
                 expect(page.locator("#folder-tree summary")).to_contain_text("기존 폴더")
                 expect(page.locator("#review-count")).to_have_text("이동 대상 1개")
+                folder_button=page.locator('[data-entry="folder"]')
+                folder_button.locator(".entry-text").click()
+                folder_button.press("F2")
+                editor=page.get_by_role("textbox",name="새 이름")
+                editor.fill("여름 보관함")
+                editor.press("Enter")
+                expect(folder_button).to_have_text("여름 보관함")
+                assert not existing.exists()
+                existing=extra/"여름 보관함"
+                assert existing.is_dir()
                 page.locator("#organize").click()
                 dialog.get_by_role("button",name="1개 파일 이동",exact=True).click()
                 expect(dialog.get_by_role("heading",name="파일 처리 결과")).to_be_visible()

@@ -12,6 +12,7 @@ from uuid import uuid4
 import engine
 import feedback
 import storage
+import entry_names
 from readers import course_cover
 from similarity import compare
 from models import Study, ScanOptions, ScanResult, FileRow, GroupRow, MoveRow, MovePreview, RelatedFile, HistoryEvent
@@ -26,6 +27,8 @@ class Desktop:
         self.cancel=Event()
         self.plan=None
         self.generation=""
+        self.name_edit=None
+        self.folder_ids={}
 
     @property
     def study(self) -> Study:
@@ -44,6 +47,7 @@ class Desktop:
                            minConfidence=minimum,folderMode=mode)
 
     def scan(self,args) -> ScanResult:
+        self.name_edit=None
         settings=self.options()
         for key in ("deep","covers"):
             if isinstance(args.get(key),bool):settings[key]=args[key]
@@ -59,6 +63,13 @@ class Desktop:
                              course_covers=settings["covers"],roots=settings["roots"],min_confidence=minimum,folder_mode=mode)
         storage.remember_options(False,settings["deep"],settings["covers"],settings["roots"],minimum,mode)
         self.study=study
+        self.folder_ids={}
+        for group in study.groups:
+            if group.destination:
+                try:
+                    self.folder_ids[group.gid]=entry_names.identity(group.destination)[0]
+                except (OSError,ValueError):
+                    continue  # A destination can disappear during the scan.
         self.generation=uuid4().hex
         files=[FileRow(id=f.index,name=f.name,path=str(f.path),ext=f.ext,group=f.group.gid if f.group else None,
                     state=f.state,confidence=f.confidence,size=f.size,host=f.host,note=f.note) for f in study.files]
@@ -75,6 +86,50 @@ class Desktop:
         group=next((g for g in self.study.groups if g.gid==gid),None)
         if group is None:raise ValueError("그룹이 변경됐습니다. 다시 분석하고 선택하세요.")
         return group
+
+    def begin_name_edit(self,args):
+        kind=args["entry"]
+        expected=None
+        if kind=="search":
+            path=Path(args["source"])  # Supplied by Electron from its current result IDs.
+        else:
+            if args.get("generation")!=self.generation:raise ValueError("다시 분석하세요.")
+            if kind=="file":
+                f=self.file(args["id"])
+                path,expected=f.path,f.uid
+            elif kind=="folder":
+                g=self.group(args["id"])
+                if not g or not g.destination or g.gid not in self.folder_ids:
+                    raise ValueError("기존 폴더를 다시 분석하고 선택하세요.")
+                path,expected=g.destination,self.folder_ids[g.gid]
+            else:raise ValueError("항목을 다시 선택하세요.")
+        uid,folder=entry_names.identity(path)
+        if expected and uid!=expected:raise ValueError("선택한 항목이 바뀌었습니다.")
+        token=uuid4().hex
+        self.name_edit=(token,path,uid)
+        return dict(token=token,name=path.name,isFolder=folder)
+
+    def rename_entry(self,args):
+        if not self.name_edit or args.get("token")!=self.name_edit[0]:
+            raise ValueError("이름을 바꿀 항목을 다시 선택하세요.")
+        _,old,uid=self.name_edit
+        new=entry_names.rename(old,args["title"],uid)
+        self.name_edit=None
+        self.plan=None
+        result=dict(old=str(old),path=str(new),name=new.name,refresh=False)
+        s=self._study
+        if s:
+            affected=[g for g in s.groups if g.destination==old]
+            if affected and not any(root.is_relative_to(old) for root in s.roots):
+                for g in affected:
+                    g.destination=new
+                    g.title_note=g.title_note.replace(str(old),str(new))
+                    if g.title_kind=="folder":g.title=new.name
+                result.update(layout=self.review({}),groups=[dict(id=g.gid,title=g.title,note=g.title_note) for g in affected])
+            elif any(root.is_relative_to(old) or old.parent==root for root in s.roots):
+                result.update(refresh=True,roots=[entry_names.redirected(str(p),old,new) for p in s.roots])
+                self._study=None
+        return result
 
     def file(self,index):
         if type(index) is not int or not 0<=index<len(self.study.files):raise ValueError("파일을 다시 선택하세요.")
@@ -114,6 +169,23 @@ class Desktop:
         kw=dict(allow_cross_course=args.get("confirm") is True)
         if kind in ("rename","split","merge","course") and not g:raise ValueError("그룹을 선택하세요.")
         if kind in ("assign","split","create") and not files:raise ValueError("파일을 선택하세요.")
+        if kind=="folderTitle":
+            if not g or g.destination:
+                raise ValueError("이 화면에서는 제안된 새 폴더의 이름을 바꿀 수 있습니다.")
+            if not title or storage.folder_name(title)!=title:
+                raise ValueError("Windows 폴더 이름에 사용할 수 있는 문자로 100자 이내로 입력하세요.")
+            if (os.path.lexists(self.study.root/title) or
+                    any(other is not g and not other.destination and storage.folder_name(other.title).casefold()==title.casefold()
+                        for other in self.study.groups)):
+                raise ValueError("다른 폴더가 이 이름을 사용합니다.")
+            # Only the title changes. Keep the current file evidence and checkbox selection.
+            feedback.save_edit(self.study,[(g.gid,title,[])])
+            self.study.revision+=1
+            self.study.rules.rules.names[g.gid]=title
+            self.study.rules.rules.revision=self.study.revision
+            g.title,g.title_kind,g.title_note=title,"manual","사용자가 지정한 폴더 이름"
+            self.plan=None
+            return dict(title=title,note=g.title_note,layout=self.review({}))
         if kind=="assign":feedback.assign(self.study,files,dest,**kw)
         elif kind=="create":feedback.create(self.study,files,title,**kw)
         elif kind=="split":feedback.split(self.study,g,files,title,**kw)
@@ -192,18 +264,26 @@ class Desktop:
     @overload
     def run(self,action:Literal["history"],args) -> list[HistoryEvent]: ...
     @overload
-    def run(self,action:Literal["edit","openDownloads"],args) -> bool: ...
+    def run(self,action:Literal["openDownloads"],args) -> bool: ...
+    @overload
+    def run(self,action:Literal["edit"],args) -> bool|dict: ...
     @overload
     def run(self,action:Literal["bridge"],args) -> str: ...
     @overload
     def run(self,action:Literal["detail","matrix","pair","cover"],args): ...
     def run(self,action,args):
+        if action=="beginRename":return self.begin_name_edit(args)
+        if action=="renameEntry":return self.rename_entry(args)
+        if action=="doubleClickTime":
+            import ctypes
+            return ctypes.windll.user32.GetDoubleClickTime() if os.name=="nt" else 500
         if action=="scan":return self.scan(args)
         if action=="options":return self.options()
         if action=="history":return storage.recent_history()
         if action=="historyDetail":
             _,rows=storage.history_batch(args.get("batch"))
             return [dict(source=r["src"],target=r["dst"],status=r["status"],reason=r.get("reason",""),
+                         operation=r.get("operation","move"),recordedSource=r.get("recorded_src"),recordedTarget=r.get("recorded_dst"),
                          pending=storage.pending(r)) for r in rows]
         if action=="sources":
             roots=storage.validate_roots(args.get("roots"))
