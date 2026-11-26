@@ -60,6 +60,43 @@ class ReviewTests(unittest.TestCase):
         self.scan()
         self.assertFalse(any(f.hold_reason for f in self.app.study.files))
 
+    def test_extension_mode_counts_unique_files_and_rechecks_selection(self):
+        names=["north.PDF","east.pdf","west.pdf","tool.exe","tool (1).exe","tool (2).exe","README"]
+        for name in names:
+            (self.inbox/name).write_bytes(b"identical" if name.endswith(".exe") else name.encode())
+        result=self.scan(groupBy="extension")
+        self.assertEqual([(g["reason"],g["count"]) for g in result["groups"]],[("확장자 · PDF",3)])
+        self.assertFalse(self.app.study.matrix)
+        self.assertEqual(self.app.options()["groupBy"],"extension")
+        ids=[r["id"] for r in result["layout"]]
+        self.assertTrue(all(r["skip"] for r in self.app.review({"files":ids[:2]})))
+        self.app.execute(self.app.preview({"kind":"organize","files":ids}))
+        self.assertEqual({p.name for p in (self.inbox/"PDF").iterdir()},set(names[:3]))
+        self.app.execute(self.app.preview({"kind":"undo"}))
+        self.assertEqual({p.name for p in self.inbox.iterdir()},set(names))
+        (self.inbox/"EXE").mkdir()
+        reused=self.app.scan(dict(groupBy="extension",folderMode="reuse"))
+        rows=[r for r in reused["layout"] if Path(r["target"]).parent==self.inbox/"EXE"]
+        self.assertEqual(len(rows),1)
+        self.assertFalse(rows[0]["skip"])
+
+    def test_bilingual_phrase_groups_variants_but_not_document_roles(self):
+        for titles,topic in [
+            (["Aurora(오로라) 장학회 신청서","오로라(Aurora) 장학회 지침","오로라 장학회 예산"],"오로라 장학회"),
+            (["Raven(레이븐) Studio schedule","레이븐(Raven) Studio map","Raven Studio sketches"],"Raven Studio")
+        ]:
+            for stem in titles:
+                (self.inbox/(stem+".txt")).write_bytes(stem.encode())
+            result=self.scan()
+            grouped={f["group"] for f in result["files"] if Path(f["name"]).stem in titles}
+            self.assertEqual(len(grouped),1)
+            self.assertIn(topic,[g["title"] for g in result["groups"] if g["id"] in grouped])
+        for stem in ["Copper application form","Pine application form","Delta application form","자전거 신청서","오븐 신청서","세탁기 신청서"]:
+            (self.inbox/(stem+".txt")).write_bytes(stem.encode())
+        result=self.scan()
+        self.assertTrue(all(not f["group"] for f in result["files"] if "form" in f["name"] or f["name"] in
+                            {"자전거 신청서.txt","오븐 신청서.txt","세탁기 신청서.txt"}))
+
     def test_unreadable_same_size_cannot_complete_group(self):
         paths=self.project()
         for i,p in enumerate(paths):p.write_bytes(bytes([i]))

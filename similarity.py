@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from features import LEXICON, ALIASES, TASK_GENERIC, TASK_SEPARATOR, VERSION, clean, tokenize, task_name, task_prefixes
 from models import Vector
 import course_source
-from topics import TAG, activities, activity_relation, display, opaque_format
+from topics import TAG, activities, activity_relation, bilingual_topics, display, opaque_format
 import re
 
 NEIGHBORS={}
@@ -85,6 +85,8 @@ def compare(s,i,j,details=False):
     different_edition = a.year and b.year and a.year!=b.year and a.normalized==b.normalized
     if different_edition and not different_term:base*=.55
     score=base+(1-base)*context
+    if s.bilingual_topics[i] and s.bilingual_topics[i]==s.bilingual_topics[j] and not (a.year and b.year and a.year!=b.year):
+        score=max(score,.92)
     scope=course_source.relation(a,b)
     activity=activity_relation(s.activities[i],s.activities[j])
     if activity==1:
@@ -109,6 +111,7 @@ def compare(s,i,j,details=False):
 def prepare(study):
     course_source.prepare(study.files)
     study.activities=activities(study.files)
+    study.bilingual_topics=bilingual_topics(study.files)
     study.opaque_formats=[opaque_format(f.path.stem) for f in study.files]
     authors=set()
     for f in study.files:

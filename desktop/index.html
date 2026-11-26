@@ -33,7 +33,7 @@
       <div class="search-list"><div id="search-meta" role="status">검색 범위 · Everything 색인</div><div class="table-scroll"><table><thead><tr><th scope="col">이름</th><th scope="col">경로</th></tr></thead><tbody id="search-rows"></tbody></table><p id="search-empty" class="empty" role="status">이름을 입력하면 파일과 폴더가 여기에 표시됩니다.</p></div></div>
     </section>
     <div id="content" hidden></div>
-    <footer class="review-bar" hidden><div><strong id="review-count"></strong><span id="review-hint"></span></div><button class="btn primary" id="organize" data-action="organize" disabled><i aria-hidden="true" class="ph ph-folder-simple-plus"></i>이동 경로 미리보기</button></footer>
+    <footer class="review-bar" hidden><div><strong id="review-count" aria-live="polite"></strong><span id="review-hint"></span></div><button class="btn" id="organize" data-action="organize" disabled><i aria-hidden="true" class="ph ph-folder-simple-plus"></i>이동 경로 미리보기</button><button class="btn primary" id="move-selected" data-action="moveSelected" disabled><i aria-hidden="true" class="ph ph-arrow-right"></i>파일 이동</button></footer>
   </main>
 </div>
 <dialog id="dialog"><div class="dialog-frame" id="dialog-frame"></div></dialog>

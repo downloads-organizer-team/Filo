@@ -108,12 +108,15 @@ class Study:
     role_sets: list[frozenset[str]] = field(default_factory=list)
     download_times: list[float|None] = field(default_factory=list)
     activities: list[Activity | None] = field(default_factory=list)
+    bilingual_topics: list[str] = field(default_factory=list)
     opaque_formats: list[tuple[str,int,tuple[int,...]] | None] = field(default_factory=list)
     min_confidence: float = 0.7
     folder_mode: str = "new"
+    group_by: str = "related"
 
 
 class ScanOptions(TypedDict):
+    groupBy: str
     recursive: bool
     deep: bool
     covers: bool
@@ -136,6 +139,7 @@ class FileRow(TypedDict):
 
 
 class GroupRow(TypedDict):
+    reason: str
     id: str
     title: str
     note: str

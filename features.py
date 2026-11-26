@@ -13,7 +13,8 @@ GENERIC = set("개론 개요 기초 입문 분석 문서 수업 계획서 소개
 COMMON_PREFIXES={"다운로드","download","downloads","screenshot","스크린샷","image","이미지","제목 없음","attachment"}
 # A document type describes its purpose across many unrelated clients and projects.
 DOCUMENT_TYPES={"영수증","청구서","견적서","발주서","납품서","인수증","계약서","명세서","신청서",
-                "receipt","invoice","quotation","estimate","contract","statement","form","minutes","memo"}
+                "receipt","invoice","quotation","estimate","contract","statement","form","forms","application",
+                "documents","minutes","memo"}
 TASK_GENERIC=COMMON_PREFIXES|GENERIC|DOCUMENT_TYPES|{"여행","travel","trip","vacation","holiday","업무","작업","받은 파일",
     "항공권","숙소","예약","숙소예약","일정","일정표","itinerary","booking","reservation","ticket","hotel",
     "무제","제목없음","제목","없음","붙임","별첨","양식","제출","작성자","사본","강의자료","작성","제출자"}

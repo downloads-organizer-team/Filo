@@ -27,6 +27,48 @@ def words(text):
     return tuple(WORD.findall(display(text).casefold()))
 
 
+BILINGUAL = re.compile(r"([a-z]+|[가-힣]+)\s*\(\s*([가-힣]+|[a-z]+)\s*\)[ _-]*([가-힣]+|[a-z]+)", re.I)
+
+
+def bilingual_topics(files):
+    """Join a bilingual spelling to a specific two-word phrase seen in plain text."""
+    plain = defaultdict(set)
+    variants = defaultdict(set)
+    spellings = defaultdict(Counter)
+    for f in files:
+        if f.hold_reason:
+            continue
+        stem = display(f.path.stem)
+        for match in BILINGUAL.finditer(stem):
+            outer, inner, following = (part.casefold() for part in match.groups())
+            if outer.isascii() == inner.isascii():
+                continue
+            for token in (outer, inner):
+                if min(len(token), len(following)) >= 2 and token not in NOISE and following not in NOISE:
+                    variants[(token, following)].add(f.index)
+    if not variants:
+        return [""] * len(files)
+    for f in files:
+        if f.hold_reason:
+            continue
+        # Keep parentheses as boundaries so the alias itself cannot attest the plain phrase.
+        for part in re.split(r"[()]", display(f.path.stem)):
+            tokens = WORD.findall(part)
+            for left, right in zip(tokens, tokens[1:]):
+                key = (left.casefold(), right.casefold())
+                if key in variants:
+                    plain[key].add(f.index)
+                    spellings[key][left+" "+right] += 1
+    matches = defaultdict(set)
+    for key, annotated in variants.items():
+        members = plain[key] | annotated
+        if plain[key] - annotated and len(members) >= 3:
+            title = spellings[key].most_common(1)[0][0]
+            for i in members:
+                matches[i].add(title)
+    return [next(iter(matches[i])) if len(matches[i]) == 1 else "" for i in range(len(files))]
+
+
 def reference_key(match):
     prefix, number = match.groups()
     if prefix.casefold() in NON_PROGRAM_CODES or (len(number)==4 and number.startswith(("19","20"))):

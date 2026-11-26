@@ -34,6 +34,7 @@ function toast(text){clearTimeout(toastTimer);$("#toast").textContent=text;$("#t
 function status(text,canCancel=false){const el=$("#status");el.hidden=!text;el.innerHTML=esc(text)+(canCancel?'<button data-action="cancel">분석 취소</button>':"");}
 function setBusy(value){
   busy=value;document.querySelector('[data-action="scan"]').disabled=value;updateReviewBar();
+  document.querySelectorAll("[data-folder-check],[data-check],#all-check").forEach(box=>box.disabled=value);
   document.querySelectorAll('[data-file-edit],[data-action="groupRename"],[data-action="groupMenu"]').forEach(b=>b.disabled=value||(!b.matches('[data-action="groupRename"]')&&!editableIds().length));
 }
 async function call(action,args={}){
@@ -65,7 +66,7 @@ async function scan(newOptions=options,openReview=true){
     data=await call("scan",{...options,...newOptions});options={...options,...data.options,roots:data.roots||data.options?.roots||options.roots};
     groups=new Map(data.groups.map(g=>[g.id,g]));files=new Map(data.files.map(f=>[f.id,f]));
     if(scope && scope!=="hold"&&!groups.has(scope))scope=null;
-    if(openReview&&view==="search")view="review";
+    if((openReview&&view==="search")||(options.groupBy==="extension"&&["matrix","flow"].includes(view)))view="review";
     originalLayout=new Map(data.layout.map(row=>[row.id,row]));
     folderBranches=new Map();
     const destinations=new Map();
@@ -112,6 +113,7 @@ async function sourcesDialog(){
   const deepOptions=[["deep","애매한 파일의 본문 일부 확인"],["covers","대표 문서 표지에서 묶음 이름 찾기"]];
   showDialog("파일 정리하기","선택한 폴더 바로 아래의 파일을 검토합니다.",
     '<div class="setup-section"><h3>정리할 위치</h3><div id="source-roots"></div>'+btn("addSource","폴더 추가","plus")+'<p class="muted source-note" id="new-folder-parent"></p></div>'+
+    '<div class="setup-section"><label for="group-by">묶는 기준</label><select id="group-by"><option value="related">관련 작업별</option><option value="extension">확장자별</option></select><p class="muted" id="group-help"></p></div>'+
     '<fieldset class="destination-options"><legend>정리할 폴더</legend>'+[
       ["reuse","기존 폴더 활용","이름이나 안에 있는 파일이 잘 맞으면 그 폴더에 추가합니다."],
       ["new","새 폴더로만 정리","이번에 선택한 파일끼리 새 폴더를 만듭니다."]
@@ -119,14 +121,22 @@ async function sourcesDialog(){
     '<div class="setup-section"><label for="min-confidence">최소 신뢰도 <output id="min-value" for="min-confidence"></output></label><input type="range" id="min-confidence" min="0" max="1" step="0.1" value="'+sourceDraft.minConfidence+'" aria-describedby="min-description"><p id="min-description" class="muted"></p></div>'+
     '<details class="setup-section"><summary>추가 분석 옵션</summary>'+deepOptions.map(([k,t])=>'<label class="setting">'+t+'<input type="checkbox" id="opt-'+k+'" '+(sourceDraft[k]?"checked":"")+'></label>').join("")+btn("bridge","브라우저 출처 연결","plugs-connected")+'</details>',
     btn("close","취소")+btn("submitDialog","분석 시작","arrow-right",true),()=>{
-      const draft={...sourceDraft,folderMode:$('[name="folder-mode"]:checked').value,
+      const draft={...sourceDraft,groupBy:$("#group-by").value,folderMode:$('[name="folder-mode"]:checked').value,
         minConfidence:Number($("#min-confidence").value),deep:$("#opt-deep").checked,covers:$("#opt-covers").checked};
       close();return scan(draft);
     });
   const slider=$("#min-confidence");
   slider.oninput=()=>{const v=Number(slider.value);$("#min-value").textContent=v.toFixed(1);
     $("#min-description").textContent=confidenceDescriptions[Math.round(v*10)];};
-  slider.oninput();renderSources();
+  const grouping=$("#group-by");
+  grouping.value=sourceDraft.groupBy||"related";
+  grouping.onchange=()=>{
+    const byExtension=grouping.value==="extension";
+    slider.closest(".setup-section").hidden=byExtension;
+    $("#opt-deep").closest("details").hidden=byExtension;
+    $("#group-help").textContent=byExtension?"PDF, EXE처럼 같은 확장자의 파일을 한 폴더에 모읍니다.":"파일명과 다운로드 단서로 같은 작업에 쓰인 파일을 찾습니다.";
+  };
+  grouping.onchange();slider.oninput();renderSources();
 }
 async function addSource(){
   const chosen=await call("chooseFolder");
@@ -208,11 +218,12 @@ function render(){
   const generation=++renderId;nav();$("#crumb").textContent=titles[view];
   $("#headline").textContent=titles[view];renderSources();updateReviewBar();
   $("#content").classList.toggle("advanced-content",view!=="review");
+  document.body.classList.toggle("extension-review",options.groupBy==="extension");
   const searching=view==="search";
   $("#search-home").hidden=!searching;$("#content").hidden=searching;
   $(".review-bar").hidden=view!=="review";$("#root-path").hidden=searching||!data;
   $('[data-action="scan"]').hidden=searching||!data;
-  $("#setup-label").textContent=searching?"파일 정리하기":"위치 · 기준 변경";
+  $("#setup-label").textContent=searching?"파일 정리하기":"정리할 폴더 변경";
   document.querySelectorAll('.rail-section,.group-search,#group-nav,.advanced').forEach(el=>el.hidden=searching);
   if(searching){$("#external-query").focus();if(retryOnReturn)liveSearch();return;}
   if(!data)return;
@@ -233,10 +244,12 @@ function updateReviewBar(){
   const current=layout;
   const eligible=candidates.filter(f=>current.has(f.id)&&!current.get(f.id).skip);
   $("#organize").disabled=busy||!ready||!candidates.length;
-  $("#review-count").textContent=ready?"이동 대상 "+eligible.length+"개":"이동 경로 확인 중…";
+  $("#move-selected").disabled=busy||!ready||!eligible.length;
+  const folders=new Set(candidates.map(f=>folderBranches.get(f.group)));
+  $("#review-count").textContent="폴더 "+folders.size+"개 · 파일 "+candidates.length+"개 선택";
   const blocked=candidates.length-eligible.length;
-  $("#review-hint").textContent=!ready?"":blocked?"선택한 파일 중 "+blocked+"개 보류 · 폴더를 펼쳐 사유를 확인하세요.":
-    eligible.length?"미리보기에서 경로를 확인한 뒤 이동하세요.":"이동할 파일을 체크하세요.";
+  $("#review-hint").textContent=!ready?"이동 경로 확인 중…":blocked?eligible.length+"개 이동 가능 · "+blocked+"개 보류":
+    eligible.length?"선택한 파일을 이동할 수 있습니다.":"이동할 폴더나 파일을 선택하세요.";
 }
 function review(){
   $("#content").innerHTML='<div class="review-workspace"><section class="file-pane" aria-label="정리 트리"><div class="file-pane-head"><label class="search">'+icon("magnifying-glass")+'<input id="search" type="search" placeholder="파일명 필터" aria-label="현재 목록에서 파일명 필터"><kbd>Ctrl K</kbd></label></div>'+
@@ -286,13 +299,25 @@ function paintTree(){
     const kind=!g?"원래 위치 유지":destination?.mode==="existing"?"기존 폴더":"새 폴더";
     const kindOfEntry=destination?.mode==="existing"?"folder":"proposal";
     const nameControl=g?'<button class="entry-title" data-entry="'+kindOfEntry+'" data-id="'+esc(id)+'"><strong class="entry-text" title="'+esc(folderTitle)+'">'+esc(folderTitle)+'</strong></button>':'<strong>미분류</strong>';
-    node.innerHTML='<summary><span class="disclosure-hit" aria-hidden="true"></span>'+(g?'<i class="result-folder" aria-hidden="true"></i>':icon("tray"))+
+    const checkbox=g?'<input type="checkbox" data-folder-check="'+esc(id)+'" aria-label="'+esc(folderTitle)+' 폴더 선택">':"";
+    node.innerHTML='<summary><span class="disclosure-hit" aria-hidden="true"></span>'+checkbox+(g?'<i class="result-folder" aria-hidden="true"></i>':icon("tray"))+
       nameControl+'<small>'+kind+'</small><b>'+(g?(layoutReady?"이동 "+count+" / "+members.length:"확인 중"):members.length+"개")+'</b></summary><div class="tree-children"></div>';
+    if(g){
+      const box=node.querySelector("[data-folder-check]");
+      const selectedCount=members.filter(f=>selected.has(f.id)).length;
+      box.checked=selectedCount===members.length;
+      box.indeterminate=selectedCount>0&&selectedCount<members.length;
+      box.disabled=busy;
+      box.onchange=()=>{
+        for(const f of members){if(box.checked)selected.add(f.id);else selected.delete(f.id);}
+        rows();
+      };
+    }
     const paint=()=>{
       const body=node.lastElementChild;
       if(!node.open||body.childElementCount)return;
       const notes=g?[...new Set(members.map(f=>groups.get(f.group)))].map(group=>
-        '<div class="branch-note">'+esc(group.note)+'</div>').join(""):"";
+        '<div class="branch-note" title="'+esc(group.note)+'">'+esc(group.reason||group.note)+'</div>').join(""):"";
       body.innerHTML=notes+'<div class="branch-head"><span></span><span>이름</span><span>원래 폴더</span><span>이동할 폴더 · 상태</span></div>'+members.map(fileBranch).join("");
     };
     node.ontoggle=()=>{if(!node.isConnected)return;if(node.open)expanded.add(id);else expanded.delete(id);paint();markSelection();};
@@ -306,6 +331,7 @@ function paintTree(){
   $("#all-check").indeterminate=checked>0&&checked<visible.length;
   document.querySelectorAll('[data-file-edit],[data-action="groupMenu"]').forEach(b=>b.disabled=busy||!editableIds().length);
   if(focused?.check!==undefined)$('[data-check="'+focused.check+'"]')?.focus({preventScroll:true});
+  if(focused?.folderCheck)$('[data-folder-check="'+CSS.escape(focused.folderCheck)+'"]')?.focus({preventScroll:true});
   if(focusedFolder)$('[data-tree="'+CSS.escape(focusedFolder)+'"] summary')?.focus({preventScroll:true});
   updateReviewBar();
 }
@@ -352,7 +378,7 @@ async function applyRename(button,title,prepared){
   const {entry,id}=entryArgs(button);
   if(entry==="proposal"){
     const result=await call("edit",{kind:"folderTitle",group:id,title});
-    Object.assign(groups.get(id),{title:result.title,note:result.note});
+    Object.assign(groups.get(id),{title:result.title,note:result.note,reason:result.reason});
     data.layout=result.layout;
   }else{
     const result=await call("renameEntry",{token:prepared.token,title});
@@ -549,9 +575,23 @@ async function editForm(kind,gid){
     btn("close","취소")+btn("submitDialog","저장","check",true),()=>{const val=$("#value").value.trim();if(!val){$("#value").focus();return;}return applyEdit({...args,title:val});});
   $("#value").focus();$("#value").select();
 }
+async function executePlan(token){
+  close();setBusy(true);status("파일 처리 중");
+  let report;
+  try{report=await call("execute",{token});}finally{setBusy(false);status("");}
+  if(data)await scan(options,false);
+  if($("#external-query").value.trim()){
+    if(view==="search")liveSearch();else retryOnReturn=true;
+  }
+  showDialog("파일 처리 결과","",'<div class="result-lines">'+esc(report.join("\n"))+'</div>',btn("close","닫기","check",true),null,true);
+}
 async function preview(kind,args={}){
+  if(busy)return;
   const targetFiles=kind==="organize"?moveCandidates().map(f=>f.id):kind==="manual"?editableIds():[];
-  const result=await call("preview",{kind,files:targetFiles,...args});
+  let result;
+  setBusy(true);status("파일과 경로 확인 중");
+  try{result=await call("preview",{kind,files:targetFiles,...args});}
+  finally{setBusy(false);status("");}
   if(!result)return;
   const rows=result.rows,move=rows.filter(r=>!r.skip),byFolder=new Map();
   rows.forEach(r=>{const path=parentPath(r.target);if(!byFolder.has(path))byFolder.set(path,[]);byFolder.get(path).push(r);});
@@ -560,15 +600,7 @@ async function preview(kind,args={}){
   showDialog(title,move.length+"개 파일 "+(kind==="undo"?"복원 예정":"이동 예정")+(rows.length>move.length?"   ·   "+(rows.length-move.length)+"개 건너뜀":""),
     body||'<p class="empty">처리할 파일이 없습니다.</p>',btn("close","취소")+
     (kind==="organize"&&move.length?btn("changeMoveParent","새 묶음의 상위 폴더 변경","folder-open"):"")+(move.length?btn("submitDialog",move.length+"개 파일 "+(kind==="undo"?"복원":"이동"),kind==="undo"?"arrow-counter-clockwise":"folder-simple-plus",true):""),
-    async()=>{close();setBusy(true);status("파일 처리 중");let report;
-      try{report=await call("execute",{token:result.token});}finally{setBusy(false);status("");}
-      if(data)await scan(await call("options"),false);
-      if($("#external-query").value.trim()){
-        if(view==="search")liveSearch();
-        else retryOnReturn=true;
-      }
-      showDialog("파일 처리 결과","",'<div class="result-lines">'+esc(report.join("\n"))+'</div>',btn("close","닫기","check",true),null,true);
-    },true);
+    ()=>executePlan(result.token),true);
   const change=$('[data-action="changeMoveParent"]');
   if(change)change.onclick=async()=>{
     try{
@@ -616,6 +648,18 @@ async function action(key){
     case "scan":return scan();
     case "settings":return sourcesDialog();
     case "all":return setScope("all");
+    case "moveSelected":{
+      if(busy||$("#move-selected").disabled)return;
+      setBusy(true);status("선택한 파일과 이동 경로 확인 중");
+      try{
+        const result=await call("preview",{kind:"organize",files:moveCandidates().map(f=>f.id),destinationMode:options.folderMode});
+        if(!result?.rows.some(row=>!row.skip)){
+          toast("이동할 파일이 없습니다. 미리보기에서 경로를 확인하세요.");return;
+        }
+        await executePlan(result.token);
+      }finally{setBusy(false);status("");}
+      return;
+    }
     case "organize":return preview("organize",{destinationMode:options.folderMode});
     case "addSource":return addSource();
     case "sources":return sourcesDialog();
@@ -649,8 +693,6 @@ document.addEventListener("click",async e=>{
       return;
     }
     clearTimeout(renameTimer);
-    const heading=e.target.closest(".folder-tree summary");
-    if(heading&&e.detail>0&&!e.target.closest(".disclosure-hit,input")){e.preventDefault();return;}
     const el=e.target.closest("button,input,tr[data-file]");if(!el)return;
     const d=el.dataset;
     if(d.history)return await historyDetail(d.history);
@@ -680,7 +722,6 @@ document.addEventListener("click",async e=>{
 document.addEventListener("pointerdown",e=>{
   const button=e.target.closest("[data-entry]");
   if(button&&!e.target.closest(".entry-text"))e.preventDefault();
-  if(e.target.closest(".folder-tree summary")&&!e.target.closest(".entry-text,.disclosure-hit,input"))e.preventDefault();
 });
 document.addEventListener("dblclick",e=>{
   const button=e.target.closest(".entry-text")?.closest("[data-entry]");

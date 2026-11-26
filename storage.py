@@ -88,14 +88,23 @@ def validate_roots(roots):
     return result
 
 
-def remember_options(recursive,deep,course_covers=True,roots=None,minimum=None,mode=None):
+def grouping_option():
+    try:
+        value=json.loads((HOME/"download-settings.json").read_text(encoding="utf-8"))
+        return "extension" if value.get("groupBy")=="extension" else "related"
+    except (OSError,ValueError,AttributeError):
+        return "related"
+
+
+def remember_options(recursive,deep,course_covers=True,roots=None,minimum=None,mode=None,group_by=None):
     old_min,old_mode=organization_options()
     try:
         HOME.mkdir(parents=True,exist_ok=True)
         save(HOME/"download-settings.json",dict(recursive=recursive,deep=deep,course_covers=course_covers,
                                                roots=source_roots() if roots is None else list(map(str,roots)),
                                                minConfidence=old_min if minimum is None else minimum,
-                                               folderMode=old_mode if mode is None else mode))
+                                               folderMode=old_mode if mode is None else mode,
+                                               groupBy=group_by or grouping_option()))
     except OSError:pass
 
 def sample():

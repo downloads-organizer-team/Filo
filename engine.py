@@ -1,8 +1,10 @@
 """Classify first, then name groups using optional, bounded course-cover evidence."""
 from pathlib import Path
+from collections import defaultdict
+from uuid import uuid5, NAMESPACE_URL
 from time import perf_counter
-from models import Study
-from scanner import scan
+from models import Study, Group
+from scanner import scan, check_directory
 from features import extract
 from similarity import prepare
 from matrix import build
@@ -13,7 +15,7 @@ from refinement import refine,summarize
 from constraints import Constraints
 from eligibility import identify_files, eligible_groups
 from existing_folders import recommend
-from storage import plan_group_folders
+from storage import folder_name, plan_group_folders
 import feedback
 
 def discover_relations(root,recursive=False,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,roots=None,min_confidence=.7):
@@ -47,8 +49,48 @@ def discover_relations(root,recursive=False,deep=True,stop=lambda:None,status=la
     return s
 
 
+def extension_study(root,roots,folder_mode,stop,status):
+    start=perf_counter()
+    s=Study(Path(root).absolute(),False)
+    s.roots=[Path(p).absolute() for p in roots] if roots else [s.root]
+    s.folder_mode=folder_mode
+    s.group_by="extension"
+    status("파일 스캔 중");scan(s,False,stop)
+    status("고유 파일과 사본 확인 중");identify_files(s.files,stop)
+    saved=feedback.load(s.files)
+    s.revision=saved.revision
+    s.rules=Constraints(s.files,saved)
+    buckets=defaultdict(list)
+    for f in s.files:
+        f.ext=f.path.suffix[1:].lower()
+        if f.hold_reason or not f.ext or f.index in s.rules.hold:
+            f.note=f.hold_reason or ("사용자가 미분류로 지정" if f.ext else "확장자 없음")
+            continue
+        buckets[f.ext].append(f)
+    for ext,members in sorted(buckets.items()):
+        stop()
+        gid=str(uuid5(NAMESPACE_URL,"extension/"+str(s.root)+"/"+ext))
+        title=folder_name(saved.names.get(gid,ext.upper()))
+        g=Group(gid,title,members,title_kind="extension",title_note="확장자 · "+ext.upper())
+        if folder_mode=="reuse":
+            for parent in s.roots:
+                try:
+                    g.destination=check_directory(parent/title)
+                    break
+                except OSError:
+                    continue
+        for f in members:
+            f.group=g;f.state="확장자 분류";f.note=g.title_note
+        s.groups.append(g)
+    eligible_groups(s,plan_group_folders(s,mode=folder_mode))
+    s.ms=round((perf_counter()-start)*1000)
+    return s
+
+
 def analyze(root,recursive=False,deep=True,stop=lambda:None,status=lambda text:None,*,course_covers=None,
-            roots=None,min_confidence=.7,folder_mode="new"):
+            roots=None,min_confidence=.7,folder_mode="new",group_by="related"):
+    if group_by=="extension":
+        return extension_study(root,roots,folder_mode,stop,status)
     study = discover_relations(root,recursive,deep,stop,status,course_covers=course_covers,
                                roots=roots,min_confidence=min_confidence)
     study.folder_mode = folder_mode

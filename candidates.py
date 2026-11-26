@@ -45,6 +45,11 @@ def assign_title(study,group,rules,read_covers=False):
         group.title_note=("형식이 같은 긴 식별자 · 기록된 다운로드 시각 차이 5분 이내" if recorded
                           else "형식이 같은 긴 식별자 · 같은 다운로드 사이트와 2분 이내의 파일 생성 시각")
         return
+    phrases={study.bilingual_topics[f.index] for f in group.members}
+    if len(phrases)==1 and all(phrases):
+        group.title=next(iter(phrases))
+        group.title_note="파일명에 반복된 한영 병기와 공통 주제 · "+group.title
+        return
     vectors=[study.vectors[f.index] for f in group.members]
     literal=Counter(k for vec in vectors for k in vec.literal if not SESSION_LABEL.fullmatch(k))
     context=Counter(k for vec in vectors for k in vec.context)

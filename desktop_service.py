@@ -20,6 +20,19 @@ from file_search import SearchResult
 import file_search
 
 
+def group_reason(group):
+    kind=group.title_kind
+    if kind=="extension":return "확장자 · "+group.members[0].ext.upper()
+    if kind=="batch":return "다운로드 시각 · "+group.title
+    if kind=="manual":return "직접 지정 · "+group.title
+    if kind=="folder":return "기존 폴더 · "+group.title
+    if kind in {"confirmed","lms","cover"}:
+        return {"confirmed":"확인한 과목명","lms":"강좌 출처","cover":"문서 표지"}[kind]+" · "+group.title
+    if kind in {"filename","activity"} or group.title_note.startswith(("모든 파일 이름","파일명에 반복된")):
+        return "파일명 · "+group.title
+    return group.title_note.split(" · 기존 폴더 ")[0]
+
+
 class Desktop:
     def __init__(self, status=lambda message:None):
         self._study:Study|None=None
@@ -44,7 +57,7 @@ class Desktop:
         _,deep,covers=storage.scan_options()
         minimum,mode=storage.organization_options()
         return ScanOptions(recursive=False,deep=deep,covers=covers,roots=storage.source_roots(),
-                           minConfidence=minimum,folderMode=mode)
+                           minConfidence=minimum,folderMode=mode,groupBy=storage.grouping_option())
 
     def scan(self,args) -> ScanResult:
         self.name_edit=None
@@ -58,10 +71,12 @@ class Desktop:
         if not settings["roots"]:raise ValueError("정리할 폴더를 하나 이상 선택하세요.")
         minimum,mode=storage.validate_criteria(args.get("minConfidence",settings["minConfidence"]),
                                                 args.get("folderMode",settings["folderMode"]))
-        settings.update(minConfidence=minimum,folderMode=mode)
+        group_by=args.get("groupBy",settings["groupBy"])
+        if group_by not in ("related","extension"):raise ValueError("묶는 기준을 확인하세요.")
+        settings.update(minConfidence=minimum,folderMode=mode,groupBy=group_by)
         study=engine.analyze(settings["roots"][0],False,settings["deep"],check,self.status,
-                             course_covers=settings["covers"],roots=settings["roots"],min_confidence=minimum,folder_mode=mode)
-        storage.remember_options(False,settings["deep"],settings["covers"],settings["roots"],minimum,mode)
+                             course_covers=settings["covers"],roots=settings["roots"],min_confidence=minimum,folder_mode=mode,group_by=group_by)
+        storage.remember_options(False,settings["deep"],settings["covers"],settings["roots"],minimum,mode,group_by)
         self.study=study
         self.folder_ids={}
         for group in study.groups:
@@ -73,7 +88,7 @@ class Desktop:
         self.generation=uuid4().hex
         files=[FileRow(id=f.index,name=f.name,path=str(f.path),ext=f.ext,group=f.group.gid if f.group else None,
                     state=f.state,confidence=f.confidence,size=f.size,host=f.host,note=f.note) for f in study.files]
-        groups=[GroupRow(id=g.gid,title=g.title,note=g.title_note,confidence=g.confidence,count=len(g.members))
+        groups=[GroupRow(id=g.gid,title=g.title,note=g.title_note,reason=group_reason(g),confidence=g.confidence,count=len(g.members))
                 for g in study.groups]
         return ScanResult(root=str(study.root),roots=list(map(str,study.roots)),files=files,groups=groups,options=settings,
                     layout=self.review({}),
@@ -124,8 +139,8 @@ class Desktop:
                 for g in affected:
                     g.destination=new
                     g.title_note=g.title_note.replace(str(old),str(new))
-                    if g.title_kind=="folder":g.title=new.name
-                result.update(layout=self.review({}),groups=[dict(id=g.gid,title=g.title,note=g.title_note) for g in affected])
+                    if g.title_kind in {"folder","extension"}:g.title=new.name
+                result.update(layout=self.review({}),groups=[dict(id=g.gid,title=g.title,note=g.title_note,reason=group_reason(g)) for g in affected])
             elif any(root.is_relative_to(old) or old.parent==root for root in s.roots):
                 result.update(refresh=True,roots=[entry_names.redirected(str(p),old,new) for p in s.roots])
                 self._study=None
@@ -183,9 +198,11 @@ class Desktop:
             self.study.revision+=1
             self.study.rules.rules.names[g.gid]=title
             self.study.rules.rules.revision=self.study.revision
-            g.title,g.title_kind,g.title_note=title,"manual","사용자가 지정한 폴더 이름"
+            g.title=title
+            if g.title_kind!="extension":
+                g.title_kind,g.title_note="manual","사용자가 지정한 폴더 이름"
             self.plan=None
-            return dict(title=title,note=g.title_note,layout=self.review({}))
+            return dict(title=title,note=g.title_note,reason=group_reason(g),layout=self.review({}))
         if kind=="assign":feedback.assign(self.study,files,dest,**kw)
         elif kind=="create":feedback.create(self.study,files,title,**kw)
         elif kind=="split":feedback.split(self.study,g,files,title,**kw)
@@ -302,6 +319,9 @@ class Desktop:
             from browser_bridge import register
             return str(register())
         if self._study is None or args.get("generation")!=self.generation:raise ValueError("목록을 다시 분석하세요.")
+        if self.study.group_by=="extension" and (action in {"related","matrix","pair","cover"} or
+                (action=="edit" and args.get("kind")!="folderTitle")):
+            raise ValueError("파일 관계를 검토하려면 관련 작업별로 분석하세요.")
         if action=="related":
             from matrix import related
             return related(self.study,self.file(args["id"]).index)
