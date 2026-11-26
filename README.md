@@ -4,7 +4,10 @@
 
 <h1 align="center">Filo</h1>
 
-<p align="center">PC에서 파일을 찾고, 같은 작업에 쓴 자료를 한 폴더에 모으세요.</p>
+<p align="center">
+  쌓여 있는 다운로드 폴더와 작업 파일, 찾기부터 정리까지 Filo로 끝내세요.<br>
+  함께 쓴 파일끼리 알아서 묶어 주거나 확장자별로 나누고, 잘못 옮겨도 바로 되돌릴 수 있습니다.
+</p>
 
 <p align="center">
   <a href="https://github.com/downloads-organizer-team/Filo/releases/download/v1.2.1/Filo-1.2.1-Setup-x64.exe"><img src="https://img.shields.io/badge/Windows_x64_Setup-v1.2.1-6854D5?style=for-the-badge&amp;labelColor=343247" alt="Filo v1.2.1 Windows x64 설치 파일 받기"></a>
