@@ -2,9 +2,9 @@
 
 **파일 정리하기**를 누르면 설정 창이 열립니다. **분석 시작**을 누르면 앱이 정리할 폴더와 파일을 제안합니다. **파일 이동**을 누르면 선택한 파일을 옮깁니다. **이동 경로 미리보기**로 목적지를 먼저 볼 수 있습니다.
 
-@answer scope="Windows 데스크톱 앱 · 선택한 원본 폴더" span=12
+@answer scope="v1.2.0 · Windows x64 · 선택한 원본 폴더" span=12
 @meta locale=ko style=clean
-@source identity title="고유 파일과 사본 판정" path=eligibility.py lines=31:56
+@source identity title="고유 파일과 사본 판정" path=eligibility.py lines=31:54
 @source engine title="파일 분석과 폴더 추천 순서" path=engine.py lines=21:103
 @source hash title="Python 3.13 · hashlib" url=https://docs.python.org/3.13/library/hashlib.html
 @source archify title="도식 제작 · Archify" url=https://github.com/tt-a1i/archify
@@ -87,10 +87,19 @@
 
 파일 검색은 현재 계정으로 읽을 수 있는 로컬 고정 드라이브에서 이름을 찾아 최대 200개 경로를 표시합니다. 파일 정리는 선택한 원본 폴더 바로 아래만 수집합니다. 여러 원본을 합쳐 분석 대상이 3,000개를 넘으면 분석을 중단합니다.
 
+## 설치와 내장 검색 {#distribution}
+
+v1.2.0 설치 파일은 Electron, Python, Everything 엔진과 SDK를 함께 설치하고 시작 메뉴에 **다운로드 정리**를 등록합니다. 앱은 현재 계정으로 전용 검색 엔진을 실행합니다. 색인이 준비되면 마지막 검색어로 조회합니다. 앱을 닫으면 전용 엔진도 종료합니다. 다음 실행에서는 `%LOCALAPPDATA%\MoaFileReview\Search`의 색인을 열고 변경 사항을 다시 확인합니다. [설치 설정](../packaging/windows.iss)
+
+엔진과 SDK는 저작권과 허가 고지를 보존하면 상업적 사용과 재배포를 허용합니다. 설치판에는 엔진 원본, PCRE의 조건·면책 문구를 포함한 엔진 고지, SDK 고지가 들어 있습니다. [엔진과 PCRE 고지](../vendor/everything/License.txt) · [SDK 고지](../vendor/Everything3-LICENSE.txt)
+
 ## 구현 진입점 {#source}
 
 | 단계 | 함수 | 역할 |
 | --- | --- | --- |
+| 내장 검색 시작 | `BundledEngine.start()` | 앱 데이터 폴더의 설정과 색인 경로를 지정해 전용 엔진을 시작합니다. |
+| 파일명 검색 | `SdkClient.search()` | 색인 준비 상태를 확인하고 SDK로 파일과 폴더 이름을 찾습니다. |
+| 검색 종료 | `BundledEngine.close()` | 전용 엔진에 종료를 요청하고 프로세스를 정리합니다. |
 | 파일 수집 | `Desktop.scan()` | 선택한 원본 폴더의 바로 아래에서 파일을 수집합니다. |
 | 사본 확인 | `identify_files()` | 크기별 개수를 집계합니다. 같은 크기의 파일만 전부 읽습니다. |
 | 관련 작업별 | `discover_relations()` | 사본을 보류하고 이름, 시각, 위치, 출처로 관계를 계산합니다. |
@@ -100,7 +109,11 @@
 | 파일 이동 | `execute_moves()` | 이동 의도를 기록하고 목적지를 확인한 뒤 선택 파일을 옮깁니다. |
 | 작업 복원 | `storage.undo()` | 복원 가능한 파일을 역순으로 원래 경로에 옮깁니다. |
 
-## 실제 다운로드 폴더의 병목과 Rust 전환 {#speed}
+## 검색과 파일 정리의 실측 {#timing}
+
+**v1.2.0 파일 검색**　Windows x64 PC 한 대에서 빈 앱 프로필과 기본 고정 드라이브로 한 번 측정했습니다. 약 1초 간격으로 조회해 지정한 파일 경로가 처음 결과에 나타날 때까지 192.6초가 걸렸습니다. 그 결과를 반환한 검색 작업자의 요청·응답 시간은 9ms였습니다. 화면 렌더링은 측정 범위에서 제외했습니다.
+
+**파일 정리와 Rust 전환**　아래 값은 이전 커밋에서 같은 폴더를 반복 분석한 기록입니다.
 
 다운로드 폴더의 파일 1,813개를 분석했습니다. 첫 측정에서는 사본 확인이 가장 오래 걸렸습니다. 직후 반복에서는 유사도 행렬과 정밀 분석이 전체 분석 시간의 약 71%를 차지했습니다.
 

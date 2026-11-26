@@ -27,6 +27,12 @@ Windows x64 설치 파일에는 검색 엔진 `vendor/everything/Everything.exe`
 - 재배포 라이선스·바이너리 해시: [Everything3-LICENSE.txt](../vendor/Everything3-LICENSE.txt)
 - 검색 엔진은 [공식 1.5.0.1424b x64 영문 포터블 ZIP](https://www.voidtools.com/Everything-1.5.0.1424b.x64.en-US.zip)을 사용합니다. 배포 ZIP의 SHA-256은 `b6beff0f7808045d16585ffc785cc93ea27064cdffe5d674688abc26f3414e7b`입니다. [공식 체크섬](https://www.voidtools.com/Everything-1.5.0.1424b.sha256) · [엔진 라이선스](../vendor/everything/License.txt)
 
+### 재배포 조건
+
+공식 엔진과 SDK의 허가문은 저작권과 허가 고지를 포함하는 조건으로 복제·배포·판매를 허용합니다. 엔진에 들어 있는 PCRE는 바이너리와 함께 제공하는 자료에 저작권·조건·면책 문구를 실어야 하며, 사전 허가 없이 기여자 이름을 보증이나 홍보에 쓸 수 없습니다. [엔진·PCRE 공식 조건](https://www.voidtools.com/License.txt) · [SDK 3.0.1.12의 허가문](https://github.com/voidtools/everything_sdk3/blob/3.0.1.12/src/Everything3.c#L1-L22)
+
+v1.2.0 설치 로그에서 `vendor/everything/License.txt`와 `vendor/Everything3-LICENSE.txt`를 확인했습니다. 전자는 공식 웹 고지(2018 David Carpenter)이며, 배포한 원본 EXE 자체에도 2026 voidtools 고지와 허가문이 들어 있습니다. 이 앱은 각 PC에서 전용 인스턴스를 사용합니다. 기업에서 중앙 색인을 공유하는 Everything Server 플러그인을 운영할 때는 별도 조건을 확인해야 합니다. [Everything Server 라이선스 안내](https://www.voidtools.com/support/everything/everything_server/)
+
 ## 확장 없는 기본 동작
 
 파일명·실제 폴더·시각·번호·버전과 Windows `Zone.Identifier`에 남은 URL을 우선 사용합니다. 동일 시각, 동일 다운로드 도메인, ‘예약’ 같은 일반 단어는 보조 단서입니다. 카카오톡·클라우드 복사본의 시각과 출처가 원본과 같다고 가정하지 않습니다.
@@ -54,7 +60,11 @@ python -B test_relationships.py --benchmark
 
 Windows에서는 `python desktop_smoke.py "Electron 실행 파일 경로"`로 실제 화면을 검증합니다. 이 테스트는 저장소에 포함된 엔진을 별도 인스턴스로 시작해 자동 재시도, 폴더 아이콘, 행 높이, 이름으로 열기, 선택 이동과 복원을 확인합니다.
 
-### 이전 브랜치의 측정 결과
+### v1.2.0 기본 검색 범위 실측
+
+2026-11-26에 Windows x64 PC 한 대에서 빈 앱 프로필로 Python 서비스를 실행했습니다. 기본 고정 드라이브를 대상으로 약 1초 간격으로 `Everything3_x64.dll`을 검색해 지정한 전체 경로가 처음 반환될 때까지 **192.6초**가 걸렸습니다. 그 응답에 기록된 검색 작업자의 요청·응답 시간은 **9ms**였습니다. 한 번의 관측값이며 UI 렌더링은 측정 범위에서 제외했습니다. [개발 가이드 실측표](file-organizing.html#timing)
+
+### 이전 브랜치의 파일 정리 측정 결과
 
 Windows 11 x64, Core Ultra 7 258V에서 얻은 단일 실행 값입니다. 합성 입력은 서로 구별되는 두 파일짜리 프로젝트들이며, 모든 쌍을 비교합니다. 후보를 생략해 속도를 얻는 방식은 사용하지 않았습니다.
 
@@ -66,4 +76,4 @@ Windows 11 x64, Core Ultra 7 258V에서 얻은 단일 실행 값입니다. 합�
 
 설치 전부터 존재하던 실제 파일 2,144개를 두 폴더에서 합쳐 분석한 별도 실행은 본문 분석을 끈 상태에서 18.733초였습니다. 출처 URL이 없는 파일 830개, 브라우저 다운로드 시각이 없는 파일 2,144개를 포함했고 945개를 미분류로 남겼습니다. 이 자료의 정답 묶음을 사용자가 라벨링한 것은 아니므로 **분류 정확도 수치로 해석하면 안 됩니다**. 분석 전후 파일 목록·크기·수정 시각·식별자 해시는 동일했고 실제 파일 이동은 하지 않았습니다.
 
-현재 분석은 O(n²)이며 3,000개 한도를 유지합니다. Everything 검색이 빠르다는 사실이 대량 파일의 관계 분석까지 같은 속도라는 뜻은 아닙니다.
+관련 작업별 분석에서 전체 유사도 행렬의 크기는 O(n²)입니다. 파일 정리는 선택한 원본 폴더에서 총 3,000개까지 분석합니다.
